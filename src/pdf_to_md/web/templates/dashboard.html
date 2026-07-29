@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}转换工作台 · PDF Knowledge MD{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">PDF → MARKDOWN</p>
+    <h1>让规范和手册变成<br>可检索的企业知识。</h1>
+    <p class="hero-copy">
+      上传一份 PDF，系统会分析文档类型、生成 Markdown、执行质量检查，
+      并保留源文件、版本与审计信息。
+    </p>
+  </div>
+  <div class="hero-stats">
+    <div><strong>{{ tasks|length }}</strong><span>最近任务</span></div>
+    <div><strong>{{ max_upload_mb }} MB</strong><span>单文件上限</span></div>
+    <div><strong>{{ available_engine_count }}</strong><span>可用引擎</span></div>
+  </div>
+</section>
+
+<section class="workspace-grid">
+  <article class="panel upload-panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">NEW CONVERSION</p>
+        <h2>创建转换任务</h2>
+      </div>
+      <span class="step-badge">01</span>
+    </div>
+    <form action="/tasks" method="post" enctype="multipart/form-data" class="upload-form">
+      <label>
+        <span>业务文档 ID <em>必填</em></span>
+        <input name="document_id" required maxlength="128"
+               placeholder="例如：CS-MANUAL-001">
+        <small>跨服务器保持稳定，只能包含文字、数字、点、横线和下划线。</small>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>解析器</span>
+          <select name="engine">
+            {% for name in ["auto", "pypdf", "docling", "paddleocr"] %}
+            <option value="{{ name }}" {% if name == default_engine %}selected{% endif %}>
+              {{ name }}{% if name != "auto" and not engines[name].available %}（未安装）{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>业务版本</span>
+          <input name="business_version" placeholder="例如：2026.1">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          <span>知识分类</span>
+          <input name="category" placeholder="例如：售后服务">
+        </label>
+        <label>
+          <span>生效日期</span>
+          <input type="date" name="effective_date">
+        </label>
+      </div>
+      <label class="drop-zone" data-drop-zone>
+        <input type="file" name="pdf" accept=".pdf,application/pdf" required>
+        <span class="drop-icon">PDF</span>
+        <strong>拖拽 PDF 到这里，或点击选择</strong>
+        <small>最大 {{ max_upload_mb }} MB；业务数据只保存在当前服务存储目录。</small>
+        <output data-file-name>尚未选择文件</output>
+      </label>
+      <button class="primary-button" type="submit">
+        <span>开始转换</span><span aria-hidden="true">→</span>
+      </button>
+    </form>
+  </article>
+
+  <aside class="panel engine-panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">ENGINE STATUS</p>
+        <h2>解析器状态</h2>
+      </div>
+      <span class="step-badge">02</span>
+    </div>
+    <ul class="engine-list">
+      {% for name, state in engines.items() %}
+      <li>
+        <span class="status-dot {{ 'online' if state.available else 'offline' }}"></span>
+        <div><strong>{{ name }}</strong><small>{{ state.version }}</small></div>
+        <span class="status-label">{{ "可用" if state.available else "未安装" }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="notice">
+      <strong>质量保护已开启</strong>
+      <p>疑似扫描件在没有 OCR 引擎时只保存候选版本，不覆盖当前发布内容。</p>
+    </div>
+  </aside>
+</section>
+
+<section class="panel task-panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">RECENT TASKS</p>
+      <h2>最近转换任务</h2>
+    </div>
+    <button class="ghost-button" type="button" onclick="location.reload()">刷新</button>
+  </div>
+  {% if tasks %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>文档</th><th>文件</th><th>引擎</th><th>状态</th><th>创建时间</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for task in tasks %}
+        <tr>
+          <td><strong>{{ task.document_id }}</strong><small>{{ task.category or "未分类" }}</small></td>
+          <td>{{ task.original_filename }}</td>
+          <td><code>{{ task.engine }}</code></td>
+          <td><span class="task-status status-{{ task.status }}">{{ status_labels.get(task.status, task.status) }}</span></td>
+          <td>{{ task.created_at[:19].replace("T", " ") }}</td>
+          <td><a class="row-link" href="/tasks/{{ task.id }}">查看 →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <strong>还没有转换任务</strong>
+    <p>上传第一份 PDF 后，任务进度和质量报告会显示在这里。</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

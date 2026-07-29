@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Markdown 预览 · {{ task.document_id }}{% endblock %}
+{% block content %}
+<nav class="breadcrumb">
+  <a href="/">转换工作台</a><span>/</span>
+  <a href="/tasks/{{ task.id }}">{{ task.document_id }}</a><span>/</span>
+  <span>Markdown 预览</span>
+</nav>
+<section class="preview-header">
+  <div><p class="eyebrow">SAFE TEXT PREVIEW</p><h1>{{ task.document_id }}</h1></div>
+  <a class="primary-button" href="/tasks/{{ task.id }}/download/markdown">下载 Markdown</a>
+</section>
+<section class="markdown-preview">
+  <pre>{{ markdown_text }}</pre>
+</section>
+{% endblock %}
