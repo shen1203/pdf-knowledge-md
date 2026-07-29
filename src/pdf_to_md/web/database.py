@@ -56,6 +56,7 @@ class TaskStore:
                     original_filename TEXT NOT NULL,
                     stored_path TEXT NOT NULL,
                     engine TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'full',
                     category TEXT,
                     business_version TEXT,
                     effective_date TEXT,
@@ -72,6 +73,17 @@ class TaskStore:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(conversion_tasks)"
+                ).fetchall()
+            }
+            if "mode" not in columns:
+                connection.execute(
+                    "ALTER TABLE conversion_tasks "
+                    "ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_conversion_tasks_created
@@ -87,6 +99,7 @@ class TaskStore:
         original_filename: str,
         stored_path: Path,
         engine: str,
+        mode: str,
         category: str | None,
         business_version: str | None,
         effective_date: str | None,
@@ -96,9 +109,9 @@ class TaskStore:
             connection.execute(
                 """
                 INSERT INTO conversion_tasks (
-                    id, document_id, original_filename, stored_path, engine,
+                    id, document_id, original_filename, stored_path, engine, mode,
                     category, business_version, effective_date, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)
                 """,
                 (
                     task_id,
@@ -106,6 +119,7 @@ class TaskStore:
                     original_filename,
                     str(stored_path.resolve()),
                     engine,
+                    mode,
                     category or None,
                     business_version or None,
                     effective_date or None,

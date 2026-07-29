@@ -3,6 +3,11 @@ if (dropZone) {
   const input = dropZone.querySelector('input[type="file"]');
   const output = dropZone.querySelector("[data-file-name]");
   const submit = document.querySelector("[data-submit-button]");
+  const modeInputs = Array.from(document.querySelectorAll('input[name="mode"]'));
+  const selectedMode = () => modeInputs.find((option) => option.checked)?.value || "full";
+  const updateSubmitLabel = () => {
+    submit.textContent = selectedMode() === "summary" ? "生成重点摘要" : "完整转换";
+  };
   const showFile = () => {
     const file = input.files[0];
     output.classList.remove("file-error");
@@ -30,6 +35,10 @@ if (dropZone) {
   };
 
   input.addEventListener("change", showFile);
+  for (const modeInput of modeInputs) {
+    modeInput.addEventListener("change", updateSubmitLabel);
+  }
+  updateSubmitLabel();
   for (const eventName of ["dragenter", "dragover"]) {
     dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
@@ -48,7 +57,9 @@ if (dropZone) {
   });
   dropZone.closest("form").addEventListener("submit", () => {
     submit.disabled = true;
-    submit.textContent = "正在上传并转换…";
+    submit.textContent = selectedMode() === "summary"
+      ? "正在生成重点摘要…"
+      : "正在完整转换…";
   });
 }
 

@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from urllib.parse import quote
 
-from ..completeness import evaluate_completeness
-from ..pipeline import ConversionPipeline, PipelineConfig
+from ..comparison import build_comparison_report
+from ..pipeline import ConversionPipeline, PipelineConfig, sha256_text
+from ..summarizer import create_extract_summary
 from .database import TaskStore, utc_now
 from .settings import WebSettings
 
@@ -54,13 +55,32 @@ class TaskProcessor:
             if not outcome.output_path or not outcome.manifest_path:
                 raise RuntimeError("转换没有生成 Markdown 文件")
             markdown = outcome.output_path.read_text(encoding="utf-8")
-            completeness = evaluate_completeness(
-                Path(task["stored_path"]),
-                markdown,
-            )
+            summary_metadata = None
+            if task["mode"] == "summary":
+                markdown, summary_metadata = create_extract_summary(
+                    markdown,
+                    fallback_title=Path(task["original_filename"]).stem,
+                )
+                outcome.output_path.write_text(
+                    markdown,
+                    encoding="utf-8",
+                    newline="\n",
+                )
             with outcome.manifest_path.open("r", encoding="utf-8") as handle:
                 manifest = json.load(handle)
-            manifest["completeness"] = completeness
+            manifest["conversion_mode"] = task["mode"]
+            manifest["markdown"]["sha256"] = sha256_text(markdown)
+            manifest["markdown"]["bytes"] = len(markdown.encode("utf-8"))
+            comparison = build_comparison_report(
+                Path(task["stored_path"]),
+                markdown,
+                mode=task["mode"],
+                conversion_warnings=manifest.get("quality", {}).get(
+                    "warnings", []
+                ),
+                summary_metadata=summary_metadata,
+            )
+            manifest["comparison"] = comparison
             temporary_manifest = outcome.manifest_path.with_suffix(".json.tmp")
             with temporary_manifest.open(
                 "w", encoding="utf-8", newline="\n"
@@ -71,12 +91,12 @@ class TaskProcessor:
             self.store.update_task(
                 task_id,
                 status=(
-                    "completed" if completeness["passed"] else "incomplete"
+                    "completed" if comparison["passed"] else "incomplete"
                 ),
                 quality_status=(
-                    "passed" if completeness["passed"] else "failed"
+                    "passed" if comparison["passed"] else "failed"
                 ),
-                message=completeness["summary"],
+                message=comparison["summary"],
                 version_id=outcome.version_id,
                 output_path=str(outcome.output_path) if outcome.output_path else None,
                 manifest_path=(

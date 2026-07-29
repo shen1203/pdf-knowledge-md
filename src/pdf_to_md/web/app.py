@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -91,7 +91,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="PDF to Markdown",
-        version="0.4.0",
+        version="0.5.0",
         lifespan=lifespan,
     )
     app.state.settings = settings
@@ -117,7 +117,13 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         )
 
     @app.post("/convert")
-    async def convert_pdf(pdf: UploadFile = File(...)):
+    async def convert_pdf(
+        mode: str = Form("full"),
+        pdf: UploadFile = File(...),
+    ):
+        if mode not in {"full", "summary"}:
+            await pdf.close()
+            raise HTTPException(400, "不支持的转换模式")
         if not pdf.filename or Path(pdf.filename).suffix.lower() != ".pdf":
             await pdf.close()
             raise HTTPException(400, "只允许上传 .pdf 文件")
@@ -138,6 +144,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             original_filename=original_filename,
             stored_path=stored_path,
             engine=settings.default_engine,
+            mode=mode,
             category=None,
             business_version=None,
             effective_date=None,
@@ -154,14 +161,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         if not task:
             raise HTTPException(404, "转换任务不存在")
         manifest = load_manifest(task)
-        completeness = manifest.get("completeness") if manifest else None
+        comparison = manifest.get("comparison") if manifest else None
         return templates.TemplateResponse(
             request=request,
             name="task_detail.html",
             context={
                 "task": task,
                 "markdown_text": load_markdown(task),
-                "completeness": completeness,
+                "comparison": comparison,
                 "terminal_statuses": TERMINAL_STATUSES,
                 "status_labels": STATUS_LABELS,
             },
@@ -175,7 +182,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         path = Path(task["output_path"])
         if not path.is_file():
             raise HTTPException(404, "Markdown 文件不存在")
-        filename = f"{Path(task['original_filename']).stem}.md"
+        suffix = "-重点摘要" if task["mode"] == "summary" else ""
+        filename = f"{Path(task['original_filename']).stem}{suffix}.md"
         return FileResponse(
             path,
             media_type="text/markdown; charset=utf-8",
@@ -188,8 +196,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         if not task:
             raise HTTPException(404, "转换任务不存在")
         manifest = load_manifest(task)
-        task["completeness"] = (
-            manifest.get("completeness") if manifest else None
+        task["comparison"] = (
+            manifest.get("comparison") if manifest else None
         )
         return task
 

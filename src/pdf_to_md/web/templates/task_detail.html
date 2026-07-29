@@ -10,7 +10,7 @@
 
   <header class="result-header">
     <div>
-      <p class="eyebrow">CONVERSION RESULT</p>
+      <p class="eyebrow">CONVERSION RESULT · {{ comparison.mode_label if comparison else task.mode }}</p>
       <h1>{{ task.original_filename }}</h1>
     </div>
     <span class="task-status large status-{{ task.status }}">
@@ -32,36 +32,61 @@
     <p>{{ task.error or task.message }}</p>
   </section>
   {% else %}
-  <section class="check-card {{ 'check-passed' if completeness and completeness.passed else 'check-warning' }}">
+  <section class="check-card {{ 'check-passed' if comparison and comparison.passed else 'check-warning' }}">
     <div>
-      <span class="check-icon">{{ "✓" if completeness and completeness.passed else "!" }}</span>
+      <span class="check-icon">{{ "✓" if comparison and comparison.passed else "!" }}</span>
     </div>
     <div>
-      <strong>{{ completeness.summary if completeness else task.message }}</strong>
-      {% if completeness and completeness.warnings %}
+      <strong>{{ comparison.summary if comparison else task.message }}</strong>
+      {% if comparison and comparison.warnings %}
       <ul>
-        {% for warning in completeness.warnings %}<li>{{ warning }}</li>{% endfor %}
+        {% for warning in comparison.warnings %}<li>{{ warning }}</li>{% endfor %}
       </ul>
       {% endif %}
     </div>
   </section>
 
-  {% if completeness %}
+  {% if comparison %}
+  <section class="comparison-grid">
+    <div class="similarity-card">
+      <span>与原 PDF 文本相似度</span>
+      <strong>{{ comparison.similarity_percent }}%</strong>
+      <small>{{ comparison.similarity_method }}</small>
+    </div>
+    <div class="changes-card">
+      <h2>主要改动</h2>
+      <ul>
+        {% for change in comparison.changes %}<li>{{ change }}</li>{% endfor %}
+      </ul>
+    </div>
+  </section>
+
   <section class="check-details">
+    {% if comparison.mode == "summary" %}
     <div>
-      <strong>{{ completeness.checks.source_pages - completeness.checks.problem_pages|length - completeness.checks.unverifiable_pages|length }}/{{ completeness.checks.source_pages }}</strong>
+      <strong>{{ comparison.summary_metadata.selected_lines }}/{{ comparison.summary_metadata.source_lines }}</strong>
+      <span>抽取重点行</span>
+    </div>
+    <div>
+      <strong>{{ comparison.summary_metadata.omitted_lines }}</strong>
+      <span>主动省略行</span>
+    </div>
+    {% else %}
+    <div>
+      <strong>{{ comparison.checks.source_pages - comparison.checks.problem_pages|length - comparison.checks.unverifiable_pages|length }}/{{ comparison.checks.source_pages }}</strong>
       <span>正常页面</span>
     </div>
     <div>
-      <strong>{{ (completeness.checks.text_coverage * 100)|round|int }}%</strong>
+      <strong>{{ (comparison.checks.text_coverage * 100)|round|int }}%</strong>
       <span>正文覆盖</span>
     </div>
+    {% endif %}
     <div>
-      <strong>{{ completeness.checks.critical_facts_found }}/{{ completeness.checks.critical_facts_total }}</strong>
+      <strong>{{ comparison.checks.critical_facts_found }}/{{ comparison.checks.critical_facts_total }}</strong>
       <span>关键数字/编号</span>
     </div>
     <div>
-      <strong>{{ completeness.checks.key_statements_found }}/{{ completeness.checks.key_statements_total }}</strong>
+      <strong>{{ comparison.checks.key_statements_found }}/{{ comparison.checks.key_statements_total }}</strong>
       <span>关键要求</span>
     </div>
   </section>

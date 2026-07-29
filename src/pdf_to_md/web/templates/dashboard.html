@@ -13,6 +13,23 @@
 
   <form action="/convert" method="post" enctype="multipart/form-data"
         class="panel simple-upload-form">
+    <fieldset class="mode-picker">
+      <legend>选择转换模式</legend>
+      <label class="mode-option">
+        <input type="radio" name="mode" value="full" checked>
+        <span>
+          <strong>完整转换</strong>
+          <small>尽量保留全部正文，只做 Markdown 结构化和必要清理。</small>
+        </span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="mode" value="summary">
+        <span>
+          <strong>重点摘要</strong>
+          <small>抽取标题、步骤、关键要求、数字和型号，省略非重点内容。</small>
+        </span>
+      </label>
+    </fieldset>
     <label class="drop-zone" data-drop-zone>
       <input type="file" name="pdf" accept=".pdf,application/pdf" required>
       <span class="drop-icon">PDF</span>
@@ -21,7 +38,7 @@
       <output data-file-name aria-live="polite">尚未选择文件</output>
     </label>
     <button class="primary-button large-button" type="submit" data-submit-button>
-      上传并转换
+      按所选模式转换
     </button>
   </form>
 

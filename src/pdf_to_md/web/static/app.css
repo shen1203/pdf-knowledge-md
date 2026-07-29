@@ -42,6 +42,19 @@ h2 { margin: 0; font-size: 20px; }
   font-size: 16px; line-height: 1.75;
 }
 .simple-upload-form { margin-top: 32px; padding: 26px; display: grid; gap: 18px; }
+.mode-picker {
+  margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; border: 0;
+}
+.mode-picker legend { margin-bottom: 10px; font-weight: 800; }
+.mode-option {
+  padding: 15px; display: flex; align-items: flex-start; gap: 10px;
+  border: 1px solid var(--line); border-radius: 11px; cursor: pointer;
+}
+.mode-option:has(input:checked) { border-color: var(--green); background: #eff7f1; }
+.mode-option input { margin-top: 3px; accent-color: var(--green); }
+.mode-option span, .mode-option strong, .mode-option small { display: block; }
+.mode-option small { margin-top: 5px; color: var(--muted); line-height: 1.5; }
 .drop-zone {
   min-height: 240px; padding: 28px; display: grid; place-items: center;
   align-content: center; gap: 9px; border: 2px dashed #a9b6aa;
@@ -106,6 +119,19 @@ h2 { margin: 0; font-size: 20px; }
 }
 .check-warning .check-icon { background: var(--warning); }
 .check-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }
+.comparison-grid {
+  margin-top: 12px; display: grid; grid-template-columns: .75fr 1.25fr; gap: 12px;
+}
+.similarity-card, .changes-card {
+  padding: 20px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.similarity-card span, .similarity-card strong, .similarity-card small { display: block; }
+.similarity-card span { color: var(--muted); font-size: 13px; }
+.similarity-card strong { margin: 5px 0; color: var(--green); font-size: 46px; letter-spacing: -.05em; }
+.similarity-card small { color: var(--muted); line-height: 1.55; }
+.changes-card h2 { font-size: 17px; }
+.changes-card ul { margin: 10px 0 0; padding-left: 19px; color: var(--muted); line-height: 1.65; }
 .check-details {
   margin-top: 12px; display: grid; grid-template-columns: repeat(4, 1fr);
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
@@ -132,6 +158,7 @@ h2 { margin: 0; font-size: 20px; }
   .simple-upload-form { padding: 16px; }
   .drop-zone { min-height: 210px; }
   .simple-note, .result-header { align-items: flex-start; flex-direction: column; }
+  .mode-picker, .comparison-grid { grid-template-columns: 1fr; }
   .check-details { grid-template-columns: 1fr 1fr; }
   .check-details div:nth-child(2) { border-right: 0; }
   .check-details div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
