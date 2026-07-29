@@ -12,6 +12,9 @@ KEY_SIGNALS = (
     "必须",
     "禁止",
     "不得",
+    "严禁",
+    "应当",
+    "请勿",
     "注意",
     "要求",
     "条件",
@@ -28,6 +31,8 @@ KEY_SIGNALS = (
     "required",
     "warning",
     "prohibited",
+    "shall",
+    "do not",
     "step",
     "deadline",
 )
@@ -38,6 +43,9 @@ FACT_PATTERN = re.compile(
     r"(?![A-Za-z0-9])"
 )
 SOURCE_MARKER_PATTERN = re.compile(r"<!--\s*source-page:\s*(\d+)\s*-->")
+GLOBAL_TEXT_THRESHOLD = 0.85
+PAGE_TEXT_THRESHOLD = 0.80
+FACT_THRESHOLD = 0.98
 
 
 def _normalize(text: str) -> str:
@@ -53,6 +61,13 @@ def _ngrams(text: str, size: int = 4) -> set[str]:
     return {text[index : index + size] for index in range(len(text) - size + 1)}
 
 
+def _coverage(source: str, target: str) -> float:
+    source_ngrams = _ngrams(_normalize(source))
+    if not source_ngrams:
+        return 0.0
+    return len(source_ngrams & _ngrams(_normalize(target))) / len(source_ngrams)
+
+
 def _unique_preserving_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -64,44 +79,153 @@ def _unique_preserving_order(values: list[str]) -> list[str]:
     return result
 
 
+def _facts(text: str) -> list[str]:
+    return _unique_preserving_order(FACT_PATTERN.findall(text))
+
+
+def _key_lines(text: str) -> list[str]:
+    return _unique_preserving_order(
+        [
+            line
+            for line in text.splitlines()
+            if len(_normalize(line)) >= 4
+            and any(signal in line.casefold() for signal in KEY_SIGNALS)
+        ]
+    )
+
+
+def _split_markdown_pages(markdown: str) -> dict[int, str]:
+    matches = list(SOURCE_MARKER_PATTERN.finditer(markdown))
+    pages: dict[int, str] = {}
+    for index, match in enumerate(matches):
+        page_number = int(match.group(1))
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(markdown)
+        pages[page_number] = markdown[match.end() : end]
+    return pages
+
+
+def _page_result(
+    page_number: int,
+    source_text: str,
+    markdown_text: str | None,
+) -> dict[str, Any]:
+    source_normalized = _normalize(source_text)
+    if not source_normalized:
+        return {
+            "page": page_number,
+            "status": "unverifiable",
+            "text_coverage": None,
+            "critical_facts_total": 0,
+            "critical_facts_found": 0,
+            "key_statements_total": 0,
+            "key_statements_found": 0,
+            "issues": ["该页没有可提取原文，可能是空白页或扫描页"],
+        }
+    if markdown_text is None:
+        return {
+            "page": page_number,
+            "status": "missing",
+            "text_coverage": 0.0,
+            "critical_facts_total": len(_facts(source_text)),
+            "critical_facts_found": 0,
+            "key_statements_total": len(_key_lines(source_text)),
+            "key_statements_found": 0,
+            "issues": ["Markdown 缺少该页"],
+        }
+
+    markdown_normalized = _normalize(markdown_text)
+    facts = _facts(source_text)
+    key_lines = _key_lines(source_text)
+    found_facts = [fact for fact in facts if _normalize(fact) in markdown_normalized]
+    found_key_lines = [
+        line for line in key_lines if _normalize(line) in markdown_normalized
+    ]
+    text_coverage = _coverage(source_text, markdown_text)
+    fact_coverage = len(found_facts) / len(facts) if facts else 1.0
+    key_line_coverage = (
+        len(found_key_lines) / len(key_lines) if key_lines else 1.0
+    )
+
+    issues: list[str] = []
+    if text_coverage < PAGE_TEXT_THRESHOLD:
+        issues.append(f"正文覆盖率 {text_coverage:.0%}，低于 80%")
+    if fact_coverage < FACT_THRESHOLD:
+        issues.append("部分数字、日期、型号或编号未找到")
+    if key_line_coverage < 1.0:
+        issues.append("部分关键要求、注意事项或步骤未找到")
+
+    return {
+        "page": page_number,
+        "status": "complete" if not issues else "incomplete",
+        "text_coverage": round(text_coverage, 4),
+        "critical_facts_total": len(facts),
+        "critical_facts_found": len(found_facts),
+        "key_statements_total": len(key_lines),
+        "key_statements_found": len(found_key_lines),
+        "missing_critical_facts": [
+            fact for fact in facts if fact not in found_facts
+        ][:10],
+        "issues": issues,
+    }
+
+
 def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
     reader = PdfReader(str(source))
     page_texts = [(page.extract_text() or "") for page in reader.pages]
     source_text = "\n".join(page_texts)
     source_normalized = _normalize(source_text)
     markdown_normalized = _normalize(markdown)
+    markdown_pages = _split_markdown_pages(markdown)
 
-    mapped_pages = {
-        int(match.group(1)) for match in SOURCE_MARKER_PATTERN.finditer(markdown)
-    }
-    page_mapping_complete: bool | None = None
-    if mapped_pages:
-        page_mapping_complete = mapped_pages == set(range(1, len(page_texts) + 1))
+    if markdown_pages:
+        page_results = [
+            _page_result(
+                page_number,
+                page_text,
+                markdown_pages.get(page_number),
+            )
+            for page_number, page_text in enumerate(page_texts, start=1)
+        ]
+    else:
+        page_results = [
+            {
+                "page": page_number,
+                "status": "unverifiable",
+                "text_coverage": None,
+                "critical_facts_total": len(_facts(page_text)),
+                "critical_facts_found": 0,
+                "key_statements_total": len(_key_lines(page_text)),
+                "key_statements_found": 0,
+                "issues": ["转换结果没有源页标记，无法逐页检查"],
+            }
+            for page_number, page_text in enumerate(page_texts, start=1)
+        ]
+    problem_pages = [
+        result["page"]
+        for result in page_results
+        if result["status"] in {"missing", "incomplete"}
+    ]
+    unverifiable_pages = [
+        result["page"]
+        for result in page_results
+        if result["status"] == "unverifiable"
+    ]
 
-    facts = _unique_preserving_order(FACT_PATTERN.findall(source_text))
+    expected_pages = set(range(1, len(page_texts) + 1))
+    mapped_pages = set(markdown_pages)
+    page_mapping_complete: bool | None = (
+        mapped_pages == expected_pages if mapped_pages else None
+    )
+
+    facts = _facts(source_text)
     found_facts = [
         fact for fact in facts if _normalize(fact) in markdown_normalized
     ]
-
-    key_lines = _unique_preserving_order(
-        [
-            line
-            for line in source_text.splitlines()
-            if len(_normalize(line)) >= 4
-            and any(signal in line.casefold() for signal in KEY_SIGNALS)
-        ]
-    )
+    key_lines = _key_lines(source_text)
     found_key_lines = [
         line for line in key_lines if _normalize(line) in markdown_normalized
     ]
-
-    source_ngrams = _ngrams(source_normalized)
-    markdown_ngrams = _ngrams(markdown_normalized)
-    text_coverage = (
-        len(source_ngrams & markdown_ngrams) / len(source_ngrams)
-        if source_ngrams
-        else 0.0
-    )
+    text_coverage = _coverage(source_text, markdown)
     fact_coverage = len(found_facts) / len(facts) if facts else 1.0
     key_line_coverage = (
         len(found_key_lines) / len(key_lines) if key_lines else 1.0
@@ -119,18 +243,32 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
         passed = (
             bool(markdown_normalized)
             and page_mapping_complete is not False
-            and text_coverage >= 0.85
-            and fact_coverage >= 0.98
+            and not problem_pages
+            and not unverifiable_pages
+            and text_coverage >= GLOBAL_TEXT_THRESHOLD
+            and fact_coverage >= FACT_THRESHOLD
             and key_line_coverage >= 1.0
         )
-        status = "complete" if passed else "incomplete"
+        status = "complete" if passed else (
+            "limited" if unverifiable_pages and not problem_pages else "incomplete"
+        )
         if not markdown_normalized:
             warnings.append("Markdown 没有可用正文")
         if page_mapping_complete is False:
-            warnings.append("部分 PDF 页面没有对应的 Markdown 页码标记")
-        if text_coverage < 0.85:
-            warnings.append("正文覆盖率低于 85%，可能存在内容遗漏")
-        if fact_coverage < 0.98:
+            warnings.append("Markdown 的源页标记不完整")
+        if problem_pages:
+            warnings.append(
+                "以下页面可能存在内容遗漏："
+                + "、".join(str(page) for page in problem_pages)
+            )
+        if unverifiable_pages:
+            warnings.append(
+                "以下页面没有可提取原文，无法自动验证："
+                + "、".join(str(page) for page in unverifiable_pages)
+            )
+        if text_coverage < GLOBAL_TEXT_THRESHOLD:
+            warnings.append("整份文档正文覆盖率低于 85%")
+        if fact_coverage < FACT_THRESHOLD:
             warnings.append("部分数字、日期、编号或参数未在 Markdown 中找到")
         if key_line_coverage < 1.0:
             warnings.append("部分关键要求、注意事项或步骤未在 Markdown 中找到")
@@ -139,6 +277,8 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
         "source_pages": len(page_texts),
         "mapped_pages": len(mapped_pages),
         "page_mapping_complete": page_mapping_complete,
+        "problem_pages": problem_pages,
+        "unverifiable_pages": unverifiable_pages,
         "source_text_characters": len(source_normalized),
         "markdown_text_characters": len(markdown_normalized),
         "text_coverage": round(text_coverage, 4),
@@ -152,17 +292,20 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
 
     if status == "complete":
         summary = (
-            f"自动检查通过：共 {len(page_texts)} 页，正文覆盖率 "
-            f"{text_coverage:.0%}，关键数字/编号保留 "
+            f"自动检查通过：{len(page_texts)}/{len(page_texts)} 页正常，"
+            f"正文覆盖率 {text_coverage:.0%}，关键数字/编号保留 "
             f"{len(found_facts)}/{len(facts)}。"
         )
     elif status == "limited":
-        summary = "转换已完成，但原 PDF 无可提取文本，无法自动验证关键信息。"
+        summary = (
+            f"转换已完成，但有 {len(unverifiable_pages) or len(page_texts)} 页"
+            "无法自动验证，可能需要 OCR。"
+        )
     else:
         summary = (
-            f"转换已完成，但自动检查发现可能遗漏：正文覆盖率 "
-            f"{text_coverage:.0%}，关键数字/编号保留 "
-            f"{len(found_facts)}/{len(facts)}。"
+            f"转换已完成，但第 "
+            f"{'、'.join(str(page) for page in problem_pages) or '未知'} 页"
+            "可能存在遗漏。"
         )
 
     return {
@@ -170,5 +313,6 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
         "passed": passed,
         "summary": summary,
         "checks": checks,
+        "pages": page_results,
         "warnings": warnings,
     }

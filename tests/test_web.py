@@ -72,6 +72,7 @@ class WebApplicationTests(unittest.TestCase):
         self.assertNotIn("业务文档 ID", home.text)
         self.assertNotIn("质量报告", home.text)
         self.assertNotIn("解析器状态", home.text)
+        self.assertIn("data-drop-zone", home.text)
         self.assertEqual(self.client.get("/health/live").json()["status"], "ok")
         self.assertEqual(
             self.client.get("/health/ready").json()["status"],
@@ -103,6 +104,8 @@ class WebApplicationTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertIn("自动检查通过", result.text)
         self.assertIn("Service must start within 30 minutes", result.text)
+        self.assertIn("返回上一级", result.text)
+        self.assertIn("正常页面", result.text)
 
         markdown = self.client.get(f"/result/{task_id}/download")
         self.assertEqual(markdown.status_code, 200)

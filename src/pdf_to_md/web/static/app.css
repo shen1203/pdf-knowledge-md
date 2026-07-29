@@ -51,6 +51,7 @@ h2 { margin: 0; font-size: 20px; }
 .drop-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .drop-zone small { color: var(--muted); }
 .drop-zone output { margin-top: 7px; color: var(--green); font-weight: 700; }
+.drop-zone output.file-error { color: var(--danger); }
 .drop-icon {
   width: 54px; height: 54px; display: grid; place-items: center;
   color: var(--green); background: #eaf4ed; border-radius: 12px; font-weight: 900;
@@ -105,6 +106,15 @@ h2 { margin: 0; font-size: 20px; }
 }
 .check-warning .check-icon { background: var(--warning); }
 .check-card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }
+.check-details {
+  margin-top: 12px; display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+}
+.check-details div { padding: 15px; border-right: 1px solid var(--line); }
+.check-details div:last-child { border-right: 0; }
+.check-details strong, .check-details span { display: block; }
+.check-details strong { font-size: 18px; }
+.check-details span { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .result-actions { margin: 18px 0 30px; display: flex; gap: 10px; flex-wrap: wrap; }
 .preview-block { margin-top: 18px; }
 .preview-heading {
@@ -122,6 +132,9 @@ h2 { margin: 0; font-size: 20px; }
   .simple-upload-form { padding: 16px; }
   .drop-zone { min-height: 210px; }
   .simple-note, .result-header { align-items: flex-start; flex-direction: column; }
+  .check-details { grid-template-columns: 1fr 1fr; }
+  .check-details div:nth-child(2) { border-right: 0; }
+  .check-details div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .result-header h1 { font-size: 30px; }
   .result-actions a { width: 100%; }
 }

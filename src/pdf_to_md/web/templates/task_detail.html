@@ -3,7 +3,10 @@
 {% block body_attributes %}data-task-id="{{ task.id }}" data-task-status="{{ task.status }}"{% endblock %}
 {% block content %}
 <section class="result-shell">
-  <nav class="breadcrumb"><a href="/">重新上传</a><span>/</span><span>转换结果</span></nav>
+  <nav class="breadcrumb">
+    <a href="/" data-back-button>← 返回上一级</a>
+    <span>/</span><span>转换结果</span>
+  </nav>
 
   <header class="result-header">
     <div>
@@ -42,6 +45,27 @@
       {% endif %}
     </div>
   </section>
+
+  {% if completeness %}
+  <section class="check-details">
+    <div>
+      <strong>{{ completeness.checks.source_pages - completeness.checks.problem_pages|length - completeness.checks.unverifiable_pages|length }}/{{ completeness.checks.source_pages }}</strong>
+      <span>正常页面</span>
+    </div>
+    <div>
+      <strong>{{ (completeness.checks.text_coverage * 100)|round|int }}%</strong>
+      <span>正文覆盖</span>
+    </div>
+    <div>
+      <strong>{{ completeness.checks.critical_facts_found }}/{{ completeness.checks.critical_facts_total }}</strong>
+      <span>关键数字/编号</span>
+    </div>
+    <div>
+      <strong>{{ completeness.checks.key_statements_found }}/{{ completeness.checks.key_statements_total }}</strong>
+      <span>关键要求</span>
+    </div>
+  </section>
+  {% endif %}
 
   <div class="result-actions">
     <a class="primary-button" href="/result/{{ task.id }}/download">下载 Markdown</a>

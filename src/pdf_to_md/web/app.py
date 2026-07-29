@@ -91,7 +91,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="PDF to Markdown",
-        version="0.3.0",
+        version="0.4.0",
         lifespan=lifespan,
     )
     app.state.settings = settings
