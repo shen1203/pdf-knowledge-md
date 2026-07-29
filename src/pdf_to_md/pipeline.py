@@ -197,6 +197,7 @@ class ConversionPipeline:
                 "requested": self.config.engine,
                 "selected": output.engine,
                 "version": output.engine_version,
+                "metadata": output.metadata,
             },
             "markdown": {
                 "filename": "document.md",

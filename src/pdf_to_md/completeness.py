@@ -43,6 +43,10 @@ FACT_PATTERN = re.compile(
     r"(?![A-Za-z0-9])"
 )
 SOURCE_MARKER_PATTERN = re.compile(r"<!--\s*source-page:\s*(\d+)\s*-->")
+OCR_MARKER_PATTERN = re.compile(
+    r"<!--\s*extraction-method:\s*ocr\s*-->"
+)
+HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.DOTALL)
 GLOBAL_TEXT_THRESHOLD = 0.85
 PAGE_TEXT_THRESHOLD = 0.80
 FACT_THRESHOLD = 0.98
@@ -104,10 +108,16 @@ def _split_markdown_pages(markdown: str) -> dict[int, str]:
     return pages
 
 
+def _without_internal_comments(markdown: str) -> str:
+    return HTML_COMMENT_PATTERN.sub("", markdown).strip()
+
+
 def _page_result(
     page_number: int,
     source_text: str,
     markdown_text: str | None,
+    *,
+    verification_basis: str,
 ) -> dict[str, Any]:
     source_normalized = _normalize(source_text)
     if not source_normalized:
@@ -119,6 +129,7 @@ def _page_result(
             "critical_facts_found": 0,
             "key_statements_total": 0,
             "key_statements_found": 0,
+            "verification_basis": verification_basis,
             "issues": ["该页没有可提取原文，可能是空白页或扫描页"],
         }
     if markdown_text is None:
@@ -130,6 +141,7 @@ def _page_result(
             "critical_facts_found": 0,
             "key_statements_total": len(_key_lines(source_text)),
             "key_statements_found": 0,
+            "verification_basis": verification_basis,
             "issues": ["Markdown 缺少该页"],
         }
 
@@ -162,6 +174,7 @@ def _page_result(
         "critical_facts_found": len(found_facts),
         "key_statements_total": len(key_lines),
         "key_statements_found": len(found_key_lines),
+        "verification_basis": verification_basis,
         "missing_critical_facts": [
             fact for fact in facts if fact not in found_facts
         ][:10],
@@ -169,9 +182,38 @@ def _page_result(
     }
 
 
-def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
+def evaluate_completeness(
+    source: Path,
+    markdown: str,
+    *,
+    reference_markdown: str | None = None,
+) -> dict[str, Any]:
     reader = PdfReader(str(source))
-    page_texts = [(page.extract_text() or "") for page in reader.pages]
+    native_page_texts = [(page.extract_text() or "") for page in reader.pages]
+    reference_pages = (
+        _split_markdown_pages(reference_markdown)
+        if reference_markdown
+        else {}
+    )
+    page_texts: list[str] = []
+    verification_bases: list[str] = []
+    ocr_reference_pages: list[int] = []
+    for page_number, native_text in enumerate(native_page_texts, start=1):
+        if _normalize(native_text):
+            page_texts.append(native_text)
+            verification_bases.append("pdf_text_layer")
+            continue
+        reference_page = reference_pages.get(page_number, "")
+        if OCR_MARKER_PATTERN.search(reference_page):
+            ocr_text = _without_internal_comments(reference_page)
+            if _normalize(ocr_text):
+                page_texts.append(ocr_text)
+                verification_bases.append("ocr_extraction")
+                ocr_reference_pages.append(page_number)
+                continue
+        page_texts.append("")
+        verification_bases.append("unavailable")
+
     source_text = "\n".join(page_texts)
     source_normalized = _normalize(source_text)
     markdown_normalized = _normalize(markdown)
@@ -183,6 +225,7 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
                 page_number,
                 page_text,
                 markdown_pages.get(page_number),
+                verification_basis=verification_bases[page_number - 1],
             )
             for page_number, page_text in enumerate(page_texts, start=1)
         ]
@@ -196,6 +239,7 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
                 "critical_facts_found": 0,
                 "key_statements_total": len(_key_lines(page_text)),
                 "key_statements_found": 0,
+                "verification_basis": verification_bases[page_number - 1],
                 "issues": ["转换结果没有源页标记，无法逐页检查"],
             }
             for page_number, page_text in enumerate(page_texts, start=1)
@@ -288,13 +332,29 @@ def evaluate_completeness(source: Path, markdown: str) -> dict[str, Any]:
         "key_statements_total": len(key_lines),
         "key_statements_found": len(found_key_lines),
         "key_statement_coverage": round(key_line_coverage, 4),
+        "pdf_text_layer_pages": [
+            page
+            for page, basis in enumerate(verification_bases, start=1)
+            if basis == "pdf_text_layer"
+        ],
+        "ocr_reference_pages": ocr_reference_pages,
+        "similarity_basis": (
+            "PDF 文字层与 OCR 提取全文"
+            if ocr_reference_pages
+            else "PDF 文字层"
+        ),
     }
 
     if status == "complete":
+        ocr_note = (
+            f"，其中 {len(ocr_reference_pages)} 页使用 OCR"
+            if ocr_reference_pages
+            else ""
+        )
         summary = (
-            f"自动检查通过：{len(page_texts)}/{len(page_texts)} 页正常，"
-            f"正文覆盖率 {text_coverage:.0%}，关键数字/编号保留 "
-            f"{len(found_facts)}/{len(facts)}。"
+            f"自动检查通过：{len(page_texts)}/{len(page_texts)} 页正常"
+            f"{ocr_note}，正文覆盖率 {text_coverage:.0%}，"
+            f"关键数字/编号保留 {len(found_facts)}/{len(facts)}。"
         )
     elif status == "limited":
         summary = (

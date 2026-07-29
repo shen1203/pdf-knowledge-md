@@ -4,7 +4,12 @@ import re
 import unicodedata
 from typing import Any
 
-from .completeness import FACT_PATTERN, KEY_SIGNALS, SOURCE_MARKER_PATTERN
+from .completeness import (
+    FACT_PATTERN,
+    KEY_SIGNALS,
+    OCR_MARKER_PATTERN,
+    SOURCE_MARKER_PATTERN,
+)
 
 
 LIST_PATTERN = re.compile(r"^(?:[-*+]|\d+[.)、]|[（(]?\d+[）)])\s*")
@@ -106,11 +111,11 @@ def create_extract_summary(
         output.extend(
             [
                 f"<!-- source-page: {page_number} -->",
-                "",
-                f"## 第 {page_number} 页重点",
-                "",
             ]
         )
+        if OCR_MARKER_PATTERN.search(page_markdown):
+            output.append("<!-- extraction-method: ocr -->")
+        output.extend(["", f"## 第 {page_number} 页重点", ""])
         if selected:
             for line, _ in selected:
                 clean_line = re.sub(r"^#{1,6}\s*", "", line).strip()

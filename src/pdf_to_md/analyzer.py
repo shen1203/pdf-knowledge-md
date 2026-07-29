@@ -58,9 +58,12 @@ def analyze_pdf(
         page_text_chars.append(_count_visible_chars(text))
 
     page_count = len(page_text_chars)
-    low_text_pages = sum(
-        char_count < min_text_chars_per_page for char_count in page_text_chars
-    )
+    low_text_page_numbers = [
+        page_number
+        for page_number, char_count in enumerate(page_text_chars, start=1)
+        if char_count < min_text_chars_per_page
+    ]
+    low_text_pages = len(low_text_page_numbers)
     low_text_page_ratio = low_text_pages / page_count if page_count else 1.0
 
     if low_text_page_ratio >= scanned_page_ratio:
@@ -77,6 +80,7 @@ def analyze_pdf(
         source=source,
         page_count=page_count,
         page_text_chars=page_text_chars,
+        low_text_page_numbers=low_text_page_numbers,
         text_chars=sum(page_text_chars),
         low_text_pages=low_text_pages,
         low_text_page_ratio=round(low_text_page_ratio, 4),

@@ -14,6 +14,7 @@ class PdfProfile:
     source: Path
     page_count: int
     page_text_chars: list[int]
+    low_text_page_numbers: list[int]
     text_chars: int
     low_text_pages: int
     low_text_page_ratio: float
@@ -34,6 +35,7 @@ class EngineOutput:
     engine_version: str
     warnings: list[str] = field(default_factory=list)
     page_markers: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

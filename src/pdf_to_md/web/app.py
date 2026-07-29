@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..engines import engine_available
 from .database import TaskStore
 from .service import TERMINAL_STATUSES, TaskProcessor, load_manifest, load_markdown
 from .settings import WebSettings
@@ -91,7 +92,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="PDF to Markdown",
-        version="0.5.0",
+        version="0.6.0",
         lifespan=lifespan,
     )
     app.state.settings = settings
@@ -113,6 +114,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             name="dashboard.html",
             context={
                 "max_upload_mb": settings.max_upload_bytes // (1024 * 1024),
+                "ocr_available": engine_available("paddleocr"),
             },
         )
 
@@ -210,7 +212,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         ready = store.ping() and os.access(settings.storage_root, os.W_OK)
         if not ready:
             raise HTTPException(503, "服务尚未就绪")
-        return {"status": "ready"}
+        return {
+            "status": "ready",
+            "ocr_available": engine_available("paddleocr"),
+        }
 
     return app
 

@@ -61,7 +61,7 @@
     </div>
   </section>
 
-  <section class="check-details">
+  <section class="check-details{% if comparison.checks.ocr_reference_pages %} has-ocr{% endif %}">
     {% if comparison.mode == "summary" %}
     <div>
       <strong>{{ comparison.summary_metadata.selected_lines }}/{{ comparison.summary_metadata.source_lines }}</strong>
@@ -89,6 +89,12 @@
       <strong>{{ comparison.checks.key_statements_found }}/{{ comparison.checks.key_statements_total }}</strong>
       <span>关键要求</span>
     </div>
+    {% if comparison.checks.ocr_reference_pages %}
+    <div>
+      <strong>{{ comparison.checks.ocr_reference_pages|length }}</strong>
+      <span>OCR 页面</span>
+    </div>
+    {% endif %}
   </section>
   {% endif %}
 

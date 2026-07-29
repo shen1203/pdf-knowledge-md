@@ -7,7 +7,7 @@
     <h1>上传 PDF，直接得到 Markdown</h1>
     <p>
       转换完成后，系统会自动核对页数、正文、关键数字、编号和重要要求，
-      然后提供预览和下载。
+      无文字层的扫描页会自动使用 OCR，然后提供预览和下载。
     </p>
   </div>
 
@@ -41,6 +41,13 @@
       按所选模式转换
     </button>
   </form>
+
+  {% if not ocr_available %}
+  <div class="simple-note warning-note">
+    <strong>OCR 尚未就绪</strong>
+    <span>文本型 PDF 可以正常转换；扫描页需要管理员安装 OCR 运行时和模型。</span>
+  </div>
+  {% endif %}
 
   <div class="simple-note">
     <strong>自动检查什么？</strong>

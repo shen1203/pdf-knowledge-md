@@ -7,7 +7,7 @@
 3. 自动检查是否可能遗漏正文、关键数字、编号和重要要求。
 4. 在线预览并下载 `.md` 文件。
 
-当前版本：0.5.0。
+当前版本：0.6.0。
 
 ## 安装
 
@@ -17,6 +17,8 @@
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[web,test]"
+python -m pip install "paddlepaddle==3.3.1"
+python -m pip install -e ".[ocr]"
 ```
 
 ## 启动
@@ -54,16 +56,18 @@ pdf-to-md-web
 - 正文四字符片段覆盖率。
 - 数字、日期、百分比、型号和编号。
 - 包含“必须、禁止、不得、注意、条件、步骤”等词的关键句。
-- 没有可提取原文的页面单独标为“无法验证”，不会误报通过。
+- 没有文字层的页面自动使用 OCR，并继续保留原 PDF 页码。
+- OCR 失败或没有识别出文字的页面单独标明，不会误报通过。
 
 自动检查用于发现明显遗漏，不会调用生成式模型总结或补写原文，也不能证明
-语义绝对正确。扫描型 PDF 如果没有可提取文本，程序会明确提示无法验证；
-这类文件需要安装 OCR 引擎。
+语义绝对正确。OCR 页面会记录识别方式和平均文字识别置信度。
 
 ## 相似度与改动说明
 
-结果页的“与原 PDF 文本相似度”使用可提取原文四字符片段在结果中的覆盖率。
-它衡量文本保留程度，不是语义正确率或模型置信度。
+结果页的“与原 PDF 文本相似度”使用 PDF 文字层和 OCR 提取全文的四字符片段
+在结果中的覆盖率。它衡量转换或摘要阶段的文本保留程度，不是语义正确率；
+扫描页使用 OCR 自身的提取结果作为比较基线，因此也不是对图片识别准确率的
+独立证明。
 
 完整转换会说明：
 
@@ -79,17 +83,45 @@ pdf-to-md-web
 - 关键数字、日期、型号和编号的保留数量。
 - 摘要按哪些 PDF 页码重新组织。
 
-## 默认转换能力
+## 自动 OCR
 
-默认安装使用 pypdf，适合可以复制文字的 PDF。Docling 和 PaddleOCR 适配器
-仍保留在项目中，后续处理复杂排版或扫描件时可以安装：
+`PDF_MD_ENGINE=auto` 时，程序会先分析每页文字密度：
+
+- 有足够文字层的页面使用 pypdf，速度快且不引入识别误差。
+- 只有文字不足的页面交给 PaddleOCR PP-StructureV3。
+- OCR 结果重新放回原页位置，并写入 `source-page` 页码标记。
+- 默认保留页面方向和文字行方向识别，关闭表格结构、公式、图表、印章、区域检测
+  和页面变形模型，控制内网模型包体积。普通表格文字仍会被 OCR，但不承诺恢复
+  精确行列；Windows CPU 默认关闭 MKLDNN，以避开当前版面模型的不兼容执行
+  路径。如业务文档需要复杂结构能力，可使用自定义 PaddleX 配置。
+- 结果页显示 OCR 页数、文本保留相似度和主要改动。
+- 某一页 OCR 失败时任务不会伪装成完整成功，会明确列出失败页。
+
+PaddleOCR 首次运行会下载模型。可在联网电脑执行：
+
+```powershell
+python .\scripts\warmup_ocr.py
+```
+
+也可以直接运行完整的离线包准备脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\prepare-offline-ocr.ps1
+```
+
+脚本会在不纳入 Git 的 `offline-ocr/` 中保存 Windows CPU 安装轮子和已经预热的
+PaddleX 模型缓存。将源码和该目录复制到公司电脑后执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-offline-ocr.ps1
+```
+
+如公司使用自定义 PaddleX 离线模型配置，可通过 `PDF_MD_OCR_CONFIG` 指向配置
+文件。Docling 仍是独立的可选版面解析器：
 
 ```powershell
 python -m pip install -e ".[docling]"
-python -m pip install -e ".[ocr]"
 ```
-
-PaddleOCR 安装前需要根据服务器 CPU/GPU 环境选择对应 PaddlePaddle 版本。
 
 ## 配置
 
@@ -98,6 +130,7 @@ PaddleOCR 安装前需要根据服务器 CPU/GPU 环境选择对应 PaddlePaddle
 | `PDF_MD_STORAGE_ROOT` | `storage` | 上传文件、任务数据库和转换结果目录 |
 | `PDF_MD_MAX_UPLOAD_MB` | `50` | 单文件大小上限 |
 | `PDF_MD_ENGINE` | `auto` | 后台自动选择的转换引擎 |
+| `PDF_MD_OCR_CONFIG` | 空 | 可选的 PaddleX 离线模型配置文件 |
 | `PDF_MD_WORKERS` | `1` | 同时转换任务数 |
 | `PDF_MD_HOST` | `127.0.0.1` | 监听地址 |
 | `PDF_MD_PORT` | `8000` | 监听端口 |
@@ -109,9 +142,9 @@ $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
 
-当前共 13 项测试，覆盖完整转换、抽取式重点摘要、相似度与改动报告、
+当前共 14 项测试，覆盖完整转换、抽取式重点摘要、相似度与改动报告、
 逐页自动完整性检查、单页遗漏检测、上传校验、结果预览、Markdown 下载、
-数据库字段和扫描件风险。
+数据库字段，以及只对缺少文字层页面执行 OCR 的混合 PDF 流程。
 
 网站已使用 Edge 真实验证：
 

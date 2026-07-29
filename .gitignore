@@ -9,6 +9,7 @@ tmp/
 storage/
 data/
 models/
+offline-ocr/
 secrets/
 .env
 .env.*

@@ -46,6 +46,16 @@ def evaluate_quality(
             status = "failed"
             score = min(score, 30)
             warnings.append("显式源页码映射不完整")
+        failed_ocr_pages = list(
+            output.metadata.get("ocr_failed_pages", [])
+        )
+        if failed_ocr_pages:
+            status = "review_required"
+            score -= min(40, len(failed_ocr_pages) * 20)
+            warnings.append(
+                "以下页面 OCR 失败："
+                + "、".join(str(page) for page in failed_ocr_pages)
+            )
         if profile.low_text_pages:
             score -= min(20, profile.low_text_pages * 2)
 
@@ -57,6 +67,12 @@ def evaluate_quality(
         "low_text_pages": profile.low_text_pages,
         "low_text_page_ratio": profile.low_text_page_ratio,
         "replacement_char_ratio": round(replacement_ratio, 6),
+        "ocr_completed_pages": list(
+            output.metadata.get("ocr_completed_pages", [])
+        ),
+        "ocr_failed_pages": list(
+            output.metadata.get("ocr_failed_pages", [])
+        ),
     }
     return QualityReport(
         status=status,

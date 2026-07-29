@@ -17,12 +17,18 @@ def build_comparison_report(
     markdown: str,
     *,
     mode: str,
+    reference_markdown: str | None = None,
     conversion_warnings: list[str] | None = None,
     summary_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    coverage = evaluate_completeness(source, markdown)
+    coverage = evaluate_completeness(
+        source,
+        markdown,
+        reference_markdown=reference_markdown,
+    )
     checks = coverage["checks"]
     similarity = float(checks["text_coverage"])
+    ocr_pages = list(checks.get("ocr_reference_pages", []))
     warnings = list(coverage["warnings"])
     changes: list[str] = []
 
@@ -50,6 +56,10 @@ def build_comparison_report(
                 ),
             ]
         )
+        if ocr_pages:
+            changes.append(
+                "扫描页先经 OCR 提取全文，再从 OCR 结果中抽取重点"
+            )
         warnings = []
         if checks["unverifiable_pages"]:
             warnings.append(
@@ -76,6 +86,10 @@ def build_comparison_report(
                 "为各页增加源页码注释，便于回查 PDF",
             ]
         )
+        if ocr_pages:
+            changes.append(
+                "仅对无文字层页面使用 OCR，其他页面继续读取 PDF 文字层"
+            )
 
     for warning in conversion_warnings or []:
         if warning not in changes:
@@ -89,8 +103,13 @@ def build_comparison_report(
         "similarity": round(similarity, 4),
         "similarity_percent": round(similarity * 100),
         "similarity_method": (
-            "PDF 可提取原文四字符片段在结果中的覆盖率；"
+            f"{checks['similarity_basis']}的四字符片段在结果中的覆盖率；"
             "这是文本保留指标，不是语义正确率"
+            + (
+                "，也不是 OCR 图片识别准确率"
+                if ocr_pages
+                else ""
+            )
         ),
         "summary": summary,
         "changes": changes,

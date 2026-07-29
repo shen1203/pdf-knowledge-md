@@ -55,6 +55,7 @@ class TaskProcessor:
             if not outcome.output_path or not outcome.manifest_path:
                 raise RuntimeError("转换没有生成 Markdown 文件")
             markdown = outcome.output_path.read_text(encoding="utf-8")
+            reference_markdown = markdown
             summary_metadata = None
             if task["mode"] == "summary":
                 markdown, summary_metadata = create_extract_summary(
@@ -75,6 +76,7 @@ class TaskProcessor:
                 Path(task["stored_path"]),
                 markdown,
                 mode=task["mode"],
+                reference_markdown=reference_markdown,
                 conversion_warnings=manifest.get("quality", {}).get(
                     "warnings", []
                 ),
