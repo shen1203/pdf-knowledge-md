@@ -1,7 +1,7 @@
 # PDF 转 Markdown 项目
 
-> 项目状态：简化版 Web MVP 0.4 已实现并通过真实拖拽浏览器回归，准备 GitHub 推送
-> 文档版本：1.2
+> 项目状态：简化版 Web MVP 0.4 已实现、验证并推送到 GitHub 私有仓库
+> 文档版本：1.3
 > 最后更新：2026-07-29
 > 文档用途：项目范围、已确认决策、实现状态、风险和下一步工作的当前事实源。
 
@@ -100,13 +100,13 @@ Windows/Linux 电脑，重新创建 Python 虚拟环境后运行。
 
 - 本地 Git 仓库已初始化，分支为 `main`。
 - 已创建私有仓库：`https://github.com/shennn123/pdf-knowledge-md`。
-- 本地已有首次功能提交和发布状态提交。
+- `main` 已推送并跟踪 `origin/main`。
 - GitHub API 与官方 SSH 443 可达，普通 Git HTTPS 443 不可达。
 - 已在 `C:\Users\13179\.ssh\id_ed25519_pdf_md` 生成项目专用 SSH 密钥。
-- 公钥尚未添加到 GitHub，因为当前 `gh` OAuth 登录缺少
-  `admin:public_key` 权限。
-- 用户完成 `gh auth refresh -h github.com -s admin:public_key` 后，继续添加
-  公钥、切换远端为 SSH 443 并推送简化版代码。
+- 已将公钥作为仅限 `shennn123/pdf-knowledge-md` 的可写 Deploy Key 添加，
+  不需要扩大 GitHub 账号的全局公钥管理权限。
+- `origin` 使用 `ssh://git@ssh.github.com:443/shennn123/pdf-knowledge-md.git`，
+  本地仓库通过项目专用私钥推送。
 
 GitHub 当前只负责源码托管。GitHub Pages 不能运行 FastAPI，正式公司内网
 部署配置继续延后。
@@ -126,9 +126,8 @@ GitHub 当前只负责源码托管。GitHub Pages 不能运行 FastAPI，正式�
 
 ## 7. 下一步
 
-1. 完成 GitHub SSH 公钥授权并推送最新简化版。
-2. 使用脱敏真实 PDF 验证普通文本、表格和扫描件。
-3. 功能稳定后再讨论公司内网部署，不提前加入认证、队列等复杂功能。
+1. 使用脱敏真实 PDF 验证普通文本、表格和扫描件。
+2. 功能稳定后再讨论公司内网部署，不提前加入认证、队列等复杂功能。
 
 ## 8. 决策记录
 
@@ -145,3 +144,4 @@ GitHub 当前只负责源码托管。GitHub Pages 不能运行 FastAPI，正式�
 | 2026-07-29 | 已验证 | 8 项自动化测试通过；Edge 真实浏览器验证只显示上传、自动检查、Markdown 预览和下载，已移除复杂功能入口 |
 | 2026-07-29 | 已实现 | Web MVP 0.4 将完整性检查升级为逐页检查，并增加问题页和无法验证页定位 |
 | 2026-07-29 | 已验证 | 10 项自动化测试通过；Edge 真实 `DataTransfer` 拖拽、非 PDF 拒绝、PDF 转换、检查明细和返回上一级均通过 |
+| 2026-07-29 | 已完成 | 使用仓库级可写 Deploy Key 和 GitHub 官方 SSH 443 将 `main` 推送到私有仓库 `shennn123/pdf-knowledge-md` |
