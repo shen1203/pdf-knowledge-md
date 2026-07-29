@@ -1,7 +1,7 @@
 # PDF 转 Markdown 与 AI 客服知识库项目
 
-> 项目状态：Web MVP 0.2 已实现；正在发布到 `shennn123/pdf-knowledge-md` 私有 GitHub 仓库进行预览
-> 文档版本：0.10
+> 项目状态：Web MVP 0.2 已实现；`shennn123/pdf-knowledge-md` 私有仓库已创建，等待 SSH 公钥授权后推送
+> 文档版本：0.11
 > 最后更新：2026-07-29
 > 文档用途：本文件是项目范围、决策、架构、风险和下一步工作的当前事实源。出现新结论时直接更新相关章节，避免并存互相冲突的旧方案。
 
@@ -122,7 +122,7 @@ GitHub Pages 只适合静态网站，不能运行本项目的 Python、PDF/OCR�
 
 已选择 GitHub 自动部署作为最终方式，不采用日常手工部署。当前决定是先完成和验证功能，Docker、GitHub Actions 和 self-hosted runner 配置延后实施。最终由公司内网服务器或同网络的 GitHub Actions self-hosted runner，在合并到受保护的 `main` 分支后构建、测试并更新服务。
 
-当前新增的短期目标是先将现有源码发布到用户个人 GitHub 的私有仓库 `shennn123/pdf-knowledge-md` 进行预览。该操作只发布源码，不代表 FastAPI 网站已经获得公网运行环境；GitHub Pages 仍不能运行本项目。当前开发机已安装 Git 和 GitHub CLI (`gh`)，GitHub 登录已经恢复并验证，目标仓库名尚未被占用；本地仓库已初始化，业务 PDF、虚拟环境、`storage/` 和临时文件已确认排除。
+当前新增的短期目标是先将现有源码发布到用户个人 GitHub 的私有仓库 `shennn123/pdf-knowledge-md` 进行预览。该操作只发布源码，不代表 FastAPI 网站已经获得公网运行环境；GitHub Pages 仍不能运行本项目。私有远端仓库和本地 `main` 首次提交已经创建，业务 PDF、虚拟环境、`storage/` 和临时文件已确认排除。由于当前网络只能访问 GitHub API 和官方 SSH 443，不能访问普通 Git HTTPS 地址，已在用户目录生成项目专用 SSH 密钥；GitHub 登录仍需增加 `admin:public_key` 权限后才能登记公钥并完成推送。
 
 计划中的自动化流水线：
 
@@ -566,3 +566,5 @@ python -m pdf_to_md batch .\input --recursive --output .\knowledge
 | 2026-07-29 | 当前阻塞 | GitHub CLI 已安装，但 DNS 解析后的 `github.com:443` TCP 连接失败，设备登录接口超时；等待恢复合规网络或正确配置命令行代理后继续登录和推送 |
 | 2026-07-29 | 已解决 | GitHub CLI 已通过浏览器设备流程登录账号 `shennn123`；沙箱外验证 GitHub API 访问正常 |
 | 2026-07-29 | 已确认 | 个人预览仓库采用私有仓库 `shennn123/pdf-knowledge-md`；本地仓库使用 `main` 分支，业务数据与开发运行产物不进入版本控制 |
+| 2026-07-29 | 已完成 | 已创建私有远端仓库 `https://github.com/shennn123/pdf-knowledge-md` 和本地首次提交；普通 Git HTTPS 端点仍不可达，因此尚未推送 |
+| 2026-07-29 | 当前阻塞 | GitHub SSH 443 可达，项目专用密钥已在本机生成，但当前 OAuth 登录缺少 `admin:public_key` 权限；等待用户完成一次 `gh auth refresh` 权限确认 |
