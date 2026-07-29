@@ -2,10 +2,10 @@ const dropZone = document.querySelector("[data-drop-zone]");
 if (dropZone) {
   const input = dropZone.querySelector('input[type="file"]');
   const output = dropZone.querySelector("[data-file-name]");
-  const showFile = () => {
+  const submit = document.querySelector("[data-submit-button]");
+  input.addEventListener("change", () => {
     output.textContent = input.files.length ? input.files[0].name : "尚未选择文件";
-  };
-  input.addEventListener("change", showFile);
+  });
   for (const eventName of ["dragenter", "dragover"]) {
     dropZone.addEventListener(eventName, (event) => {
       event.preventDefault();
@@ -15,15 +15,19 @@ if (dropZone) {
   for (const eventName of ["dragleave", "drop"]) {
     dropZone.addEventListener(eventName, () => dropZone.classList.remove("dragging"));
   }
+  dropZone.closest("form").addEventListener("submit", () => {
+    submit.disabled = true;
+    submit.textContent = "正在上传并转换…";
+  });
 }
 
 const taskId = document.body.dataset.taskId;
 const taskStatus = document.body.dataset.taskStatus;
-const terminal = new Set(["published", "review_required", "failed", "skipped", "error"]);
+const terminal = new Set(["completed", "incomplete", "error"]);
 if (taskId && !terminal.has(taskStatus)) {
   const poll = async () => {
     try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
+      const response = await fetch(`/api/result/${taskId}`, {
         headers: { Accept: "application/json" },
         cache: "no-store",
       });
@@ -33,8 +37,8 @@ if (taskId && !terminal.has(taskStatus)) {
         window.location.reload();
       }
     } catch (_) {
-      // A temporary network error should not replace the current page.
+      // Keep waiting when a temporary network error occurs.
     }
   };
-  window.setInterval(poll, 2000);
+  window.setInterval(poll, 1500);
 }

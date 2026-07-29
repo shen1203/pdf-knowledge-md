@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import io
-import json
 import tempfile
 import unittest
-import zipfile
 from pathlib import Path
 
 try:
@@ -25,7 +23,11 @@ def make_pdf_bytes() -> bytes:
     document = canvas.Canvas(buffer, pagesize=letter)
     document.setTitle("Customer Service Manual")
     document.drawString(72, 740, "1. Start service")
-    document.drawString(72, 710, "Open the service page and select Start.")
+    document.drawString(
+        72,
+        710,
+        "Service must start within 30 minutes. Model CS-2026 is required.",
+    )
     document.showPage()
     document.save()
     return buffer.getvalue()
@@ -50,16 +52,9 @@ class WebApplicationTests(unittest.TestCase):
         self.client_context.__exit__(None, None, None)
         self.temporary.cleanup()
 
-    def _upload(self, *, document_id: str = "CS-MANUAL-001"):
+    def _upload(self):
         return self.client.post(
-            "/tasks",
-            data={
-                "document_id": document_id,
-                "engine": "pypdf",
-                "category": "售后服务",
-                "business_version": "2026.1",
-                "effective_date": "2026-07-29",
-            },
+            "/convert",
             files={
                 "pdf": (
                     "操作手册.pdf",
@@ -70,69 +65,62 @@ class WebApplicationTests(unittest.TestCase):
             follow_redirects=False,
         )
 
-    def test_dashboard_and_health_endpoints(self) -> None:
-        dashboard = self.client.get("/")
-        self.assertEqual(dashboard.status_code, 200)
-        self.assertIn("企业知识文档转换工作台", dashboard.text)
+    def test_home_is_single_upload_experience(self) -> None:
+        home = self.client.get("/")
+        self.assertEqual(home.status_code, 200)
+        self.assertIn("上传 PDF，直接得到 Markdown", home.text)
+        self.assertNotIn("业务文档 ID", home.text)
+        self.assertNotIn("质量报告", home.text)
+        self.assertNotIn("解析器状态", home.text)
         self.assertEqual(self.client.get("/health/live").json()["status"], "ok")
         self.assertEqual(
             self.client.get("/health/ready").json()["status"],
             "ready",
         )
 
-    def test_upload_convert_preview_and_download(self) -> None:
+    def test_upload_converts_checks_previews_and_downloads(self) -> None:
         response = self._upload()
         self.assertEqual(response.status_code, 303)
-        task_url = response.headers["location"]
-        task_id = task_url.rsplit("/", 1)[-1]
+        result_url = response.headers["location"]
+        self.assertTrue(result_url.startswith("/result/"))
+        task_id = result_url.rsplit("/", 1)[-1]
 
-        task = self.client.get(f"/api/tasks/{task_id}")
-        self.assertEqual(task.status_code, 200)
-        task_data = task.json()
-        self.assertEqual(task_data["status"], "published")
-        self.assertEqual(task_data["document_id"], "CS-MANUAL-001")
-        self.assertEqual(task_data["quality_status"], "passed")
+        result_api = self.client.get(f"/api/result/{task_id}")
+        self.assertEqual(result_api.status_code, 200)
+        result_data = result_api.json()
+        self.assertEqual(result_data["status"], "completed")
+        self.assertTrue(result_data["completeness"]["passed"])
         self.assertEqual(
-            task_data["manifest"]["source"]["original_filename"],
-            "操作手册.pdf",
+            result_data["completeness"]["checks"]["source_pages"],
+            1,
         )
-        self.assertTrue(
-            task_data["manifest"]["source"]["uri"].startswith("web-upload://")
+        self.assertEqual(
+            result_data["completeness"]["checks"]["page_mapping_complete"],
+            True,
         )
 
-        detail = self.client.get(task_url)
-        self.assertEqual(detail.status_code, 200)
-        self.assertIn("自动质量分", detail.text)
+        result = self.client.get(result_url)
+        self.assertEqual(result.status_code, 200)
+        self.assertIn("自动检查通过", result.text)
+        self.assertIn("Service must start within 30 minutes", result.text)
 
-        preview = self.client.get(f"/tasks/{task_id}/preview")
-        self.assertEqual(preview.status_code, 200)
-        self.assertIn("Start service", preview.text)
-
-        markdown = self.client.get(f"/tasks/{task_id}/download/markdown")
+        markdown = self.client.get(f"/result/{task_id}/download")
         self.assertEqual(markdown.status_code, 200)
         self.assertIn("# Customer Service Manual", markdown.text)
+        self.assertIn("CS-2026", markdown.text)
 
-        archive = self.client.get(f"/tasks/{task_id}/download/zip")
-        self.assertEqual(archive.status_code, 200)
-        with zipfile.ZipFile(io.BytesIO(archive.content)) as zipped:
-            self.assertEqual(
-                set(zipped.namelist()),
-                {"source.pdf", "document.md", "manifest.json"},
-            )
-            manifest = json.loads(zipped.read("manifest.json"))
-            self.assertEqual(manifest["document_id"], "CS-MANUAL-001")
-
-    def test_rejects_invalid_document_id_and_non_pdf_content(self) -> None:
-        invalid_id = self._upload(document_id="../escape")
-        self.assertEqual(invalid_id.status_code, 400)
+    def test_rejects_non_pdf_content(self) -> None:
+        invalid_extension = self.client.post(
+            "/convert",
+            files={"pdf": ("notes.txt", b"hello", "text/plain")},
+        )
+        self.assertEqual(invalid_extension.status_code, 400)
 
         invalid_pdf = self.client.post(
-            "/tasks",
-            data={"document_id": "SAFE-001", "engine": "pypdf"},
+            "/convert",
             files={"pdf": ("fake.pdf", b"not a pdf", "application/pdf")},
         )
         self.assertEqual(invalid_pdf.status_code, 400)
-        self.assertEqual(self.client.get("/api/tasks").json()["tasks"], [])
 
 
 if __name__ == "__main__":

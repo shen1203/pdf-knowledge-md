@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import json
-import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+from ..completeness import evaluate_completeness
 from ..pipeline import ConversionPipeline, PipelineConfig
 from .database import TaskStore, utc_now
 from .settings import WebSettings
 
 
 TERMINAL_STATUSES = {
-    "published",
-    "review_required",
-    "failed",
-    "skipped",
+    "completed",
+    "incomplete",
     "error",
 }
 
@@ -40,6 +38,7 @@ class TaskProcessor:
                 PipelineConfig(
                     output_root=self.settings.knowledge_root,
                     engine=task["engine"],
+                    publish_review_required=True,
                 )
             )
             source_uri = (
@@ -52,11 +51,32 @@ class TaskProcessor:
                 source_uri=source_uri,
                 original_filename=task["original_filename"],
             )
+            if not outcome.output_path or not outcome.manifest_path:
+                raise RuntimeError("转换没有生成 Markdown 文件")
+            markdown = outcome.output_path.read_text(encoding="utf-8")
+            completeness = evaluate_completeness(
+                Path(task["stored_path"]),
+                markdown,
+            )
+            with outcome.manifest_path.open("r", encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            manifest["completeness"] = completeness
+            temporary_manifest = outcome.manifest_path.with_suffix(".json.tmp")
+            with temporary_manifest.open(
+                "w", encoding="utf-8", newline="\n"
+            ) as handle:
+                json.dump(manifest, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+            temporary_manifest.replace(outcome.manifest_path)
             self.store.update_task(
                 task_id,
-                status=outcome.status,
-                quality_status=outcome.quality_status,
-                message=outcome.message,
+                status=(
+                    "completed" if completeness["passed"] else "incomplete"
+                ),
+                quality_status=(
+                    "passed" if completeness["passed"] else "failed"
+                ),
+                message=completeness["summary"],
                 version_id=outcome.version_id,
                 output_path=str(outcome.output_path) if outcome.output_path else None,
                 manifest_path=(
@@ -95,27 +115,3 @@ def load_markdown(task: dict[str, object]) -> str | None:
     if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
-
-
-def build_export_zip(
-    task: dict[str, object],
-    settings: WebSettings,
-) -> Path:
-    manifest_path = Path(str(task["manifest_path"]))
-    version_dir = manifest_path.parent
-    output_path = settings.exports_root / f"{task['id']}.zip"
-    temporary = output_path.with_suffix(".zip.tmp")
-
-    candidates = {
-        "source.pdf": version_dir / "source.pdf",
-        "document.md": version_dir / "document.md",
-        "manifest.json": version_dir / "manifest.json",
-    }
-    with zipfile.ZipFile(
-        temporary, mode="w", compression=zipfile.ZIP_DEFLATED
-    ) as archive:
-        for archive_name, path in candidates.items():
-            if path.is_file():
-                archive.write(path, arcname=archive_name)
-    temporary.replace(output_path)
-    return output_path

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}PDF Knowledge MD{% endblock %}</title>
+  <title>{% block title %}PDF 转 Markdown{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
   <script src="{{ url_for('static', path='app.js') }}" defer></script>
 </head>
@@ -12,17 +12,16 @@
     <a class="brand" href="/">
       <span class="brand-mark">MD</span>
       <span>
-        <strong>PDF Knowledge MD</strong>
-        <small>企业知识文档转换工作台</small>
+        <strong>PDF 转 Markdown</strong>
+        <small>上传、转换、自动检查</small>
       </span>
     </a>
-    <span class="environment">本地功能验证版</span>
   </header>
   <main class="page-shell">
     {% block content %}{% endblock %}
   </main>
   <footer class="footer">
-    未接入公司统一身份认证，请勿暴露到公共网络。
+    自动检查用于发现明显遗漏，不会改写 PDF 原文。
   </footer>
 </body>
 </html>

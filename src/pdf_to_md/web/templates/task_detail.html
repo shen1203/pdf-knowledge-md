@@ -1,70 +1,62 @@
 {% extends "base.html" %}
-{% block title %}{{ task.document_id }} · 转换详情{% endblock %}
+{% block title %}{{ task.original_filename }} · 转换结果{% endblock %}
 {% block body_attributes %}data-task-id="{{ task.id }}" data-task-status="{{ task.status }}"{% endblock %}
 {% block content %}
-<nav class="breadcrumb"><a href="/">转换工作台</a><span>/</span><span>{{ task.document_id }}</span></nav>
+<section class="result-shell">
+  <nav class="breadcrumb"><a href="/">重新上传</a><span>/</span><span>转换结果</span></nav>
 
-<section class="detail-header">
-  <div>
-    <p class="eyebrow">CONVERSION TASK</p>
-    <h1>{{ task.document_id }}</h1>
-    <p>{{ task.original_filename }}</p>
-  </div>
-  <span class="task-status large status-{{ task.status }}">{{ status_labels.get(task.status, task.status) }}</span>
-</section>
-
-<section class="detail-grid">
-  <article class="panel">
-    <div class="panel-heading"><h2>任务信息</h2></div>
-    <dl class="metadata-list">
-      <div><dt>任务 ID</dt><dd><code>{{ task.id }}</code></dd></div>
-      <div><dt>解析器</dt><dd>{{ task.engine }}</dd></div>
-      <div><dt>知识分类</dt><dd>{{ task.category or "—" }}</dd></div>
-      <div><dt>业务版本</dt><dd>{{ task.business_version or "—" }}</dd></div>
-      <div><dt>生效日期</dt><dd>{{ task.effective_date or "—" }}</dd></div>
-      <div><dt>质量状态</dt><dd>{{ quality_labels.get(task.quality_status, task.quality_status or "等待中") }}</dd></div>
-      <div><dt>版本 ID</dt><dd><code>{{ task.version_id or "—" }}</code></dd></div>
-    </dl>
-    <div class="task-message">
-      <strong>{{ task.message or "任务已进入队列" }}</strong>
-      {% if task.error %}<pre class="error-box">{{ task.error }}</pre>{% endif %}
+  <header class="result-header">
+    <div>
+      <p class="eyebrow">CONVERSION RESULT</p>
+      <h1>{{ task.original_filename }}</h1>
     </div>
-  </article>
+    <span class="task-status large status-{{ task.status }}">
+      {{ status_labels.get(task.status, task.status) }}
+    </span>
+  </header>
 
-  <article class="panel">
-    <div class="panel-heading"><h2>质量报告</h2></div>
-    {% if manifest %}
-      <div class="score-card">
-        <strong>{{ manifest.quality.score }}</strong>
-        <span>自动质量分</span>
-      </div>
-      <dl class="metadata-list compact">
-        <div><dt>PDF 类型</dt><dd>{{ document_type_labels.get(manifest.document.document_type, manifest.document.document_type) }}</dd></div>
-        <div><dt>源页数</dt><dd>{{ manifest.document.page_count }}</dd></div>
-        <div><dt>页面映射</dt><dd>{{ manifest.quality.checks.page_mapping_complete }}</dd></div>
-        <div><dt>乱码比例</dt><dd>{{ manifest.quality.checks.replacement_char_ratio }}</dd></div>
-      </dl>
-      {% if manifest.quality.warnings %}
-      <ul class="warning-list">
-        {% for warning in manifest.quality.warnings %}<li>{{ warning }}</li>{% endfor %}
+  {% if task.status not in terminal_statuses %}
+  <section class="processing-card">
+    <span class="spinner"></span>
+    <div>
+      <strong>正在转换并自动检查</strong>
+      <p>页面会在完成后自动刷新。</p>
+    </div>
+  </section>
+  {% elif task.status == "error" %}
+  <section class="check-card check-failed">
+    <strong>转换失败</strong>
+    <p>{{ task.error or task.message }}</p>
+  </section>
+  {% else %}
+  <section class="check-card {{ 'check-passed' if completeness and completeness.passed else 'check-warning' }}">
+    <div>
+      <span class="check-icon">{{ "✓" if completeness and completeness.passed else "!" }}</span>
+    </div>
+    <div>
+      <strong>{{ completeness.summary if completeness else task.message }}</strong>
+      {% if completeness and completeness.warnings %}
+      <ul>
+        {% for warning in completeness.warnings %}<li>{{ warning }}</li>{% endfor %}
       </ul>
       {% endif %}
-    {% else %}
-      <div class="empty-state small"><p>转换完成后显示质量结果。</p></div>
-    {% endif %}
-  </article>
-</section>
+    </div>
+  </section>
 
-{% if task.output_path %}
-<section class="action-bar">
-  <a class="primary-button" href="/tasks/{{ task.id }}/preview">预览 Markdown</a>
-  <a class="secondary-button" href="/tasks/{{ task.id }}/download/markdown">下载 Markdown</a>
-  <a class="secondary-button" href="/tasks/{{ task.id }}/download/zip">下载完整 ZIP</a>
+  <div class="result-actions">
+    <a class="primary-button" href="/result/{{ task.id }}/download">下载 Markdown</a>
+    <a class="secondary-button" href="/">转换另一份 PDF</a>
+  </div>
+
+  <section class="preview-block">
+    <div class="preview-heading">
+      <h2>Markdown 预览</h2>
+      <span>安全纯文本显示</span>
+    </div>
+    <div class="markdown-preview">
+      <pre>{{ markdown_text or "没有生成可预览的内容。" }}</pre>
+    </div>
+  </section>
+  {% endif %}
 </section>
-{% elif task.status not in terminal_statuses %}
-<section class="processing-card">
-  <span class="spinner"></span>
-  <div><strong>正在处理文档</strong><p>页面会在任务状态变化后自动刷新。</p></div>
-</section>
-{% endif %}
 {% endblock %}

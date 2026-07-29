@@ -45,15 +45,10 @@ class WebSettings:
     def knowledge_root(self) -> Path:
         return self.storage_root / "knowledge"
 
-    @property
-    def exports_root(self) -> Path:
-        return self.storage_root / "exports"
-
     def prepare(self) -> None:
         for directory in (
             self.storage_root,
             self.uploads_root,
             self.knowledge_root,
-            self.exports_root,
         ):
             directory.mkdir(parents=True, exist_ok=True)
