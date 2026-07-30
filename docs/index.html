@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF 转 Markdown</title>
+    <meta name="description" content="一个可在本地运行的 PDF 转 Markdown 工具，支持 OCR 和网页上传体验。" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: "Segoe UI", Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        background: linear-gradient(135deg, #f5f7ff 0%, #eef7ff 100%);
+        color: #123;
+      }
+      main {
+        max-width: 860px;
+        margin: 0 auto;
+        padding: 3rem 1.25rem 4rem;
+      }
+      .card {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(17, 34, 51, 0.08);
+        border-radius: 20px;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.08);
+        padding: 2rem;
+      }
+      h1 { margin-top: 0; font-size: 2rem; }
+      .pill { display: inline-block; padding: 0.3rem 0.7rem; border-radius: 999px; background: #eaf3ff; color: #1f5fbf; font-size: 0.9rem; margin-right: 0.4rem; margin-bottom: 0.6rem; }
+      code { background: #f4f7fb; padding: 0.15rem 0.4rem; border-radius: 4px; }
+      a { color: #1665d8; }
+      ul { line-height: 1.7; }
+      .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.2rem; }
+      .button {
+        display: inline-block;
+        padding: 0.75rem 1rem;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .button-primary { background: #1665d8; color: white; }
+      .button-secondary { background: #eef4ff; color: #174b99; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <p><span class="pill">GitHub Pages</span><span class="pill">FastAPI + OCR</span></p>
+        <h1>PDF 转 Markdown</h1>
+        <p>这是一个面向本地办公场景的 PDF 转 Markdown 工具，支持上传 PDF、自动转换为 Markdown、OCR 识别扫描页，并提供网页体验。</p>
+        <ul>
+          <li>上传 PDF 后自动生成 Markdown</li>
+          <li>扫描页自动走 OCR，保留页码标记</li>
+          <li>提供本地网页界面，并可在 GitHub 上托管源码与静态展示页</li>
+        </ul>
+        <div class="actions">
+          <a class="button button-primary" href="https://github.com/shen1203/pdf-knowledge-md" target="_blank" rel="noreferrer">查看 GitHub 仓库</a>
+          <a class="button button-secondary" href="https://github.com/shen1203/pdf-knowledge-md/actions" target="_blank" rel="noreferrer">查看部署工作流</a>
+        </div>
+        <p style="margin-top: 1.25rem;">说明：GitHub Pages 只适合托管静态页面；当前 FastAPI 后端仍需单独部署到支持 Python 的服务上。仓库源码和这个静态预览页已经放在 GitHub。</p>
+        <p>本地运行方式：</p>
+        <pre><code>python -m pip install -e ".[web,test]"
+python -m pip install "paddlepaddle==3.3.1"
+python -m pip install -e ".[ocr]"
+pdf-to-md-web</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

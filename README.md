@@ -9,6 +9,12 @@
 
 当前版本：0.6.0。
 
+## GitHub 部署
+
+源码已托管到 GitHub 仓库：<https://github.com/shen1203/pdf-knowledge-md>
+
+仓库中已包含 GitHub Pages 部署 workflow，推送到 `main` 分支后会自动发布静态展示页。注意：GitHub Pages 仅支持静态页面；当前 FastAPI 后端仍需单独部署到支持 Python 的云服务上。
+
 ## 安装
 
 需要 Python 3.10+。
