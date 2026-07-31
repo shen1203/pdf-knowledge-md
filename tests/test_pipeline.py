@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from reportlab.lib.pagesizes import letter
@@ -18,6 +19,7 @@ from pdf_to_md.pipeline import (
     normalize_business_document_id,
 )
 from pdf_to_md.cli import _discover_pdf_sources
+from pdf_to_md.engines import PypdfEngine
 
 
 @unittest.skipIf(canvas is None, "reportlab is required for PDF integration tests")
@@ -85,6 +87,109 @@ class ConversionPipelineTests(unittest.TestCase):
         second = pipeline.convert(source)
         self.assertEqual(second.status, "skipped")
         self.assertEqual(second.version_id, first.version_id)
+
+    def test_cache_is_invalidated_when_pipeline_scope_changes(self) -> None:
+        source = self.root / "manual.pdf"
+        self._make_text_pdf(source)
+        first = ConversionPipeline(
+            PipelineConfig(output_root=self.output, engine="pypdf")
+        ).convert(source)
+        self.assertEqual(first.status, "published")
+
+        second = ConversionPipeline(
+            PipelineConfig(
+                output_root=self.output,
+                engine="pypdf",
+                max_replacement_char_ratio=0.001,
+            )
+        ).convert(source)
+        self.assertEqual(second.status, "published")
+        self.assertNotEqual(second.version_id, first.version_id)
+
+    def test_cache_is_invalidated_when_engine_signature_changes(self) -> None:
+        source = self.root / "manual.pdf"
+        self._make_text_pdf(source)
+        first = ConversionPipeline(
+            PipelineConfig(output_root=self.output, engine="pypdf")
+        ).convert(source)
+        self.assertEqual(first.status, "published")
+
+        class FakeEngine:
+            name = "pypdf"
+
+            def __init__(self) -> None:
+                self.convert_calls = 0
+
+            def convert(self, fake_source: Path, profile):
+                self.convert_calls += 1
+                return PypdfEngine().convert(fake_source, profile)
+
+        fake_engine = FakeEngine()
+
+        with (
+            patch("pdf_to_md.pipeline.select_engine", return_value=fake_engine),
+            patch(
+                "pdf_to_md.pipeline.engine_runtime_signature",
+                return_value={"name": "pypdf", "version": "changed-version"},
+            ),
+        ):
+            second = ConversionPipeline(
+                PipelineConfig(output_root=self.output, engine="pypdf")
+            ).convert(source)
+
+        self.assertEqual(second.status, "published")
+        self.assertEqual(fake_engine.convert_calls, 1)
+        self.assertNotEqual(second.version_id, first.version_id)
+
+    def test_completeness_problems_trigger_page_retry(self) -> None:
+        source = self.root / "manual.pdf"
+        self._make_text_pdf(source)
+        retry_calls: list[tuple[tuple[int, ...], str]] = []
+
+        class FakeEngine:
+            name = "pypdf"
+
+            def convert(self, fake_source: Path, profile):
+                return PypdfEngine().convert(fake_source, profile)
+
+        def fake_retry(
+            fake_source: Path,
+            profile,
+            output,
+            retry_pages,
+            *,
+            retry_reason: str,
+        ):
+            retry_calls.append((tuple(retry_pages), retry_reason))
+            return output
+
+        fake_report = {
+            "status": "incomplete",
+            "passed": False,
+            "checks": {
+                "problem_pages": [1],
+                "unverifiable_pages": [2],
+            },
+            "warnings": [],
+        }
+
+        with (
+            patch("pdf_to_md.pipeline.select_engine", return_value=FakeEngine()),
+            patch(
+                "pdf_to_md.pipeline.evaluate_completeness",
+                return_value=fake_report,
+            ),
+            patch(
+                "pdf_to_md.pipeline.retry_pages_with_paddleocr",
+                side_effect=fake_retry,
+            ),
+        ):
+            outcome = ConversionPipeline(
+                PipelineConfig(output_root=self.output, engine="pypdf")
+            ).convert(source)
+
+        self.assertEqual(retry_calls, [((1, 2), "completeness_and_ocr_failure")])
+        self.assertEqual(outcome.status, "published")
 
     def test_scan_like_pdf_is_saved_but_not_published(self) -> None:
         source = self.root / "scan.pdf"

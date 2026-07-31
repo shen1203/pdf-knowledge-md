@@ -10,7 +10,7 @@ try:
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
 
-    from pdf_to_md.web.app import create_app
+    from pdf_to_md.web.app import _automatic_document_id, create_app
     from pdf_to_md.web.settings import WebSettings
 
     WEB_TESTS_AVAILABLE = True
@@ -41,6 +41,7 @@ class WebApplicationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self.pdf_bytes = make_pdf_bytes()
         settings = WebSettings(
             storage_root=self.root / "storage",
             max_upload_bytes=2 * 1024 * 1024,
@@ -62,7 +63,7 @@ class WebApplicationTests(unittest.TestCase):
             files={
                 "pdf": (
                     "操作手册.pdf",
-                    make_pdf_bytes(),
+                    self.pdf_bytes,
                     "application/pdf",
                 )
             },
@@ -149,6 +150,35 @@ class WebApplicationTests(unittest.TestCase):
         self.assertIn("抽取重点行", result.text)
         self.assertIn("主动省略行", result.text)
 
+    def test_same_pdf_and_mode_reuses_cached_conversion(self) -> None:
+        first = self._upload()
+        second = self._upload()
+        first_task_id = first.headers["location"].rsplit("/", 1)[-1]
+        second_task_id = second.headers["location"].rsplit("/", 1)[-1]
+
+        first_result = self.client.get(f"/api/result/{first_task_id}").json()
+        second_result = self.client.get(f"/api/result/{second_task_id}").json()
+
+        self.assertEqual(first_result["status"], "completed")
+        self.assertEqual(second_result["status"], "completed")
+        self.assertEqual(first_result["version_id"], second_result["version_id"])
+        self.assertEqual(first_result["document_id"], second_result["document_id"])
+
+    def test_document_id_is_stable_per_mode_and_content(self) -> None:
+        digest = "a" * 64
+        self.assertEqual(
+            _automatic_document_id("full", digest),
+            _automatic_document_id("full", digest),
+        )
+        self.assertEqual(
+            _automatic_document_id("full", digest),
+            f"pdf-full-{digest}",
+        )
+        self.assertNotEqual(
+            _automatic_document_id("full", digest),
+            _automatic_document_id("summary", digest),
+        )
+
     def test_rejects_non_pdf_content(self) -> None:
         invalid_extension = self.client.post(
             "/convert",
@@ -168,7 +198,7 @@ class WebApplicationTests(unittest.TestCase):
             files={
                 "pdf": (
                     "manual.pdf",
-                    make_pdf_bytes(),
+                    self.pdf_bytes,
                     "application/pdf",
                 )
             },

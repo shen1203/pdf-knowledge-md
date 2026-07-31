@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from .analyzer import analyze_pdf
-from .engines import select_engine
+from .completeness import evaluate_completeness
+from .engines import (
+    engine_runtime_signature,
+    retry_pages_with_paddleocr,
+    select_engine,
+)
 from .models import ConversionOutcome, PdfProfile
 from .quality import evaluate_quality
 
@@ -106,6 +111,17 @@ def _remove_failed_staging(staging: Path, document_root: Path) -> None:
     shutil.rmtree(resolved_staging)
 
 
+def _pipeline_cache_settings(config: PipelineConfig) -> dict[str, Any]:
+    return {
+        "requested_engine": config.engine,
+        "min_text_chars_per_page": config.min_text_chars_per_page,
+        "scanned_page_ratio": config.scanned_page_ratio,
+        "mixed_page_ratio": config.mixed_page_ratio,
+        "max_replacement_char_ratio": config.max_replacement_char_ratio,
+        "publish_review_required": config.publish_review_required,
+    }
+
+
 class ConversionPipeline:
     def __init__(self, config: PipelineConfig | None = None):
         self.config = config or PipelineConfig()
@@ -117,6 +133,12 @@ class ConversionPipeline:
             scanned_page_ratio=self.config.scanned_page_ratio,
             mixed_page_ratio=self.config.mixed_page_ratio,
         )
+
+    def _cache_scope(self, engine_name: str) -> dict[str, Any]:
+        return {
+            "pipeline": _pipeline_cache_settings(self.config),
+            "engine": engine_runtime_signature(engine_name),
+        }
 
     def convert(
         self,
@@ -134,28 +156,70 @@ class ConversionPipeline:
         document_root = self.config.output_root.resolve() / document_id
         current_pointer = document_root / "current.json"
         current = _read_json(current_pointer)
+        profile: PdfProfile | None = None
+        engine = None
 
         if (
             not force
             and current
             and current.get("source", {}).get("sha256") == source_hash
         ):
+            profile = self.inspect(source)
+            engine = select_engine(self.config.engine, profile)
+            expected_scope = self._cache_scope(engine.name)
             current_version = str(current.get("version_id"))
             current_dir = document_root / "versions" / current_version
-            return ConversionOutcome(
-                status="skipped",
-                document_id=document_id,
-                version_id=current_version,
-                engine=current.get("engine"),
-                quality_status=current.get("quality_status"),
-                output_path=current_dir / "document.md",
-                manifest_path=current_dir / "manifest.json",
-                message="源文件 SHA-256 与当前已发布版本一致，已跳过重复转换",
-            )
+            output_path = current_dir / "document.md"
+            manifest_path = current_dir / "manifest.json"
+            if (
+                current.get("cache_scope") == expected_scope
+                and output_path.is_file()
+                and manifest_path.is_file()
+            ):
+                return ConversionOutcome(
+                    status="skipped",
+                    document_id=document_id,
+                    version_id=current_version,
+                    engine=current.get("engine"),
+                    quality_status=current.get("quality_status"),
+                    output_path=output_path,
+                    manifest_path=manifest_path,
+                    message="源文件与兼容转换配置一致，已跳过重复转换",
+                )
 
-        profile = self.inspect(source)
-        engine = select_engine(self.config.engine, profile)
+        if profile is None:
+            profile = self.inspect(source)
+        if engine is None:
+            engine = select_engine(self.config.engine, profile)
         output = engine.convert(source, profile)
+        retry_report = None
+        retry_pages: list[int] = []
+        if output.page_markers:
+            retry_report = evaluate_completeness(
+                source,
+                output.markdown,
+                reference_markdown=output.markdown,
+            )
+            retry_pages.extend(retry_report["checks"]["problem_pages"])
+            retry_pages.extend(retry_report["checks"]["unverifiable_pages"])
+            retry_pages.extend(output.metadata.get("ocr_failed_pages", []))
+            retry_pages = sorted(
+                {
+                    page
+                    for page in retry_pages
+                    if 1 <= int(page) <= profile.page_count
+                }
+            )
+        if retry_pages:
+            retried_output = retry_pages_with_paddleocr(
+                source,
+                profile,
+                output,
+                retry_pages,
+                retry_reason="completeness_and_ocr_failure",
+            )
+            if retried_output.markdown != output.markdown:
+                output = retried_output
         quality = evaluate_quality(
             profile,
             output,
@@ -178,12 +242,14 @@ class ConversionPipeline:
         )
         markdown_hash = sha256_text(output.markdown)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
+        cache_scope = self._cache_scope(output.engine)
         manifest = {
             "schema_version": 1,
             "document_id": document_id,
             "version_id": version_id,
             "created_at": now.isoformat(),
             "published": should_publish,
+            "cache_scope": cache_scope,
             "source": {
                 "path": str(source),
                 "uri": source_uri,
@@ -197,6 +263,7 @@ class ConversionPipeline:
                 "requested": self.config.engine,
                 "selected": output.engine,
                 "version": output.engine_version,
+                "runtime_signature": cache_scope["engine"],
                 "metadata": output.metadata,
             },
             "markdown": {
@@ -207,11 +274,10 @@ class ConversionPipeline:
             "quality": quality.to_dict(),
             "pipeline": {
                 "elapsed_ms": elapsed_ms,
-                "min_text_chars_per_page": self.config.min_text_chars_per_page,
-                "scanned_page_ratio": self.config.scanned_page_ratio,
-                "mixed_page_ratio": self.config.mixed_page_ratio,
-                "max_replacement_char_ratio": (
-                    self.config.max_replacement_char_ratio
+                **_pipeline_cache_settings(self.config),
+                "retry_pages": retry_pages,
+                "retry_report_status": (
+                    retry_report["status"] if retry_report else None
                 ),
             },
         }
@@ -238,6 +304,7 @@ class ConversionPipeline:
                 "updated_at": now.isoformat(),
                 "engine": output.engine,
                 "quality_status": quality.status,
+                "cache_scope": cache_scope,
                 "source": {"sha256": source_hash},
                 "paths": {
                     "markdown": f"versions/{version_id}/document.md",

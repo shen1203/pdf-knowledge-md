@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -29,15 +31,19 @@ STATUS_LABELS = {
 }
 
 
+@dataclass(frozen=True)
+class SavedUpload:
+    sha256: str
+
+
 def _safe_pdf_filename(filename: str | None) -> str:
     name = Path(filename or "document.pdf").name
     stem = SAFE_FILENAME.sub("_", Path(name).stem).strip("._") or "document"
     return f"{stem[:100]}.pdf"
 
 
-def _automatic_document_id(filename: str, task_id: str) -> str:
-    stem = Path(_safe_pdf_filename(filename)).stem[:80]
-    return f"{stem}-{task_id[:8]}"
+def _automatic_document_id(mode: str, source_hash: str) -> str:
+    return f"pdf-{mode}-{source_hash}"
 
 
 async def _save_upload(
@@ -45,10 +51,11 @@ async def _save_upload(
     destination: Path,
     *,
     max_bytes: int,
-) -> int:
+) -> SavedUpload:
     destination.parent.mkdir(parents=True, exist_ok=False)
     written = 0
     first_chunk = True
+    digest = hashlib.sha256()
     try:
         with destination.open("xb") as output:
             while chunk := await upload.read(1024 * 1024):
@@ -60,6 +67,7 @@ async def _save_upload(
                 if written > max_bytes:
                     raise HTTPException(413, "PDF 超过允许的上传大小")
                 output.write(chunk)
+                digest.update(chunk)
     except Exception:
         if destination.is_file():
             destination.unlink()
@@ -72,7 +80,7 @@ async def _save_upload(
         if destination.is_file():
             destination.unlink()
         raise HTTPException(400, "上传的 PDF 是空文件")
-    return written
+    return SavedUpload(sha256=digest.hexdigest())
 
 
 def create_app(settings: WebSettings | None = None) -> FastAPI:
@@ -132,13 +140,16 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
         task_id = uuid.uuid4().hex
         original_filename = Path(pdf.filename).name
-        document_id = _automatic_document_id(original_filename, task_id)
         upload_dir = settings.uploads_root / task_id
         stored_path = upload_dir / _safe_pdf_filename(original_filename)
-        await _save_upload(
+        saved_upload = await _save_upload(
             pdf,
             stored_path,
             max_bytes=settings.max_upload_bytes,
+        )
+        document_id = _automatic_document_id(
+            mode,
+            saved_upload.sha256,
         )
         store.create_task(
             task_id=task_id,

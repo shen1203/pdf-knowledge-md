@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import math
 import os
 import re
 from collections import Counter
+from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from statistics import fmean
 from tempfile import TemporaryDirectory
+from threading import Lock
 from typing import Any, Protocol
 
 from pypdf import PdfReader, PdfWriter
@@ -31,6 +34,14 @@ def _package_version(package: str) -> str:
         return version(package)
     except PackageNotFoundError:
         return "unknown"
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def engine_available(name: str) -> bool:
@@ -106,6 +117,62 @@ OCR_PIPELINE_DEFAULTS: dict[str, bool] = {
     "format_block_content": True,
     "enable_mkldnn": False,
 }
+
+
+def resolve_ocr_config_path(config_path: str | None) -> str | None:
+    if not config_path:
+        return None
+    resolved_config = Path(config_path).expanduser().resolve()
+    if not resolved_config.is_file():
+        raise EngineUnavailableError(f"OCR 配置文件不存在：{resolved_config}")
+    return str(resolved_config)
+
+
+def engine_runtime_signature(name: str) -> dict[str, Any]:
+    signature: dict[str, Any] = {"name": name}
+    packages = {
+        "pypdf": "pypdf",
+        "docling": "docling",
+        "paddleocr": "paddleocr",
+    }
+    package = packages.get(name)
+    signature["version"] = _package_version(package) if package else "unknown"
+    if name == "paddleocr":
+        config_path = resolve_ocr_config_path(os.getenv("PDF_MD_OCR_CONFIG"))
+        signature["ocr_config"] = {
+            "path": config_path,
+            "sha256": _sha256_path(Path(config_path)) if config_path else None,
+        }
+    return signature
+
+
+class _SharedPaddleRuntime:
+    def __init__(self, pipeline: object) -> None:
+        self._pipeline = pipeline
+        self._predict_lock = Lock()
+
+    def predict(self, source: Path) -> list[object]:
+        with self._predict_lock:
+            return list(self._pipeline.predict(input=str(source)))
+
+
+@lru_cache(maxsize=None)
+def _cached_paddle_runtime(config_path: str | None) -> _SharedPaddleRuntime:
+    from paddleocr import PPStructureV3
+
+    pipeline_options: dict[str, Any]
+    if config_path:
+        pipeline_options = {"paddlex_config": config_path}
+    else:
+        pipeline_options = dict(OCR_PIPELINE_DEFAULTS)
+    try:
+        pipeline = PPStructureV3(**pipeline_options)
+    except Exception as exc:
+        raise RuntimeError(
+            "PaddleOCR 初始化失败；请确认模型已下载，或通过 "
+            "PDF_MD_OCR_CONFIG 指向离线模型配置"
+        ) from exc
+    return _SharedPaddleRuntime(pipeline)
 
 
 def _as_markdown_line(line: str) -> str:
@@ -194,6 +261,104 @@ def _ocr_confidence(result: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return round(fmean(scores), 4) if scores else None
+
+
+def _ocr_page_batch(
+    source: Path,
+    profile: PdfProfile,
+    page_numbers: list[int] | set[int],
+    *,
+    retry_reason: str | None = None,
+) -> tuple[
+    dict[int, str],
+    list[dict[str, Any]],
+    list[str],
+    list[int],
+    list[int],
+]:
+    target_pages = sorted(
+        {
+            page
+            for page in page_numbers
+            if 1 <= page <= profile.page_count
+        }
+    )
+    if not target_pages:
+        return {}, [], [], [], []
+
+    config_path = resolve_ocr_config_path(os.getenv("PDF_MD_OCR_CONFIG"))
+    pipeline = _cached_paddle_runtime(config_path)
+    reader = PdfReader(str(source))
+    updates: dict[int, str] = {}
+    page_processing: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    completed_pages: list[int] = []
+    failed_pages: list[int] = []
+    method_name = "ocr_retry" if retry_reason else "ocr"
+    action_text = "已重新 OCR" if retry_reason else "已使用 OCR"
+
+    with TemporaryDirectory(prefix="pdf-md-ocr-") as temporary:
+        temporary_root = Path(temporary)
+        for page_number in target_pages:
+            single_page_pdf = temporary_root / f"page-{page_number}.pdf"
+            writer = PdfWriter()
+            writer.add_page(reader.pages[page_number - 1])
+            with single_page_pdf.open("wb") as handle:
+                writer.write(handle)
+
+            try:
+                results = pipeline.predict(single_page_pdf)
+                page_markdown = _ocr_markdown(results[0]) if results else ""
+                confidence = _ocr_confidence(results[0]) if results else None
+                if not page_markdown:
+                    raise RuntimeError("OCR 没有返回可用文字")
+                metadata_lines = ["<!-- extraction-method: ocr -->"]
+                if retry_reason:
+                    metadata_lines.append(
+                        f"<!-- retry-reason: {retry_reason} -->"
+                    )
+                if confidence is not None:
+                    metadata_lines.append(
+                        f"<!-- ocr-confidence: {confidence:.4f} -->"
+                    )
+                updates[page_number] = (
+                    "\n".join(metadata_lines) + "\n\n" + page_markdown
+                )
+                page_processing.append(
+                    {
+                        "page": page_number,
+                        "method": method_name,
+                        "status": "completed",
+                        "characters": _visible_chars(page_markdown),
+                        "confidence": confidence,
+                    }
+                )
+                completed_pages.append(page_number)
+                confidence_text = (
+                    f"，平均识别置信度 {confidence:.0%}"
+                    if confidence is not None
+                    else ""
+                )
+                warnings.append(
+                    f"第 {page_number} 页{action_text}{confidence_text}"
+                )
+            except Exception as exc:
+                page_processing.append(
+                    {
+                        "page": page_number,
+                        "method": method_name,
+                        "status": "failed",
+                        "characters": 0,
+                        "confidence": None,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                failed_pages.append(page_number)
+                warnings.append(
+                    f"第 {page_number} 页{action_text}失败（{exc}）"
+                )
+
+    return updates, page_processing, warnings, completed_pages, failed_pages
 
 
 class PypdfEngine:
@@ -306,11 +471,8 @@ class PaddleOcrEngine:
                 "PaddleOCR is not installed. Install the platform-appropriate "
                 "PaddlePaddle build and then: pip install -e .[ocr]"
             )
-        from paddleocr import PPStructureV3
-
         baseline = PypdfEngine().convert(source, profile)
         prefix, pages = _split_markdown_pages(baseline.markdown)
-        reader = PdfReader(str(source))
         low_text_pages = set(profile.low_text_page_numbers)
         warnings = [
             warning
@@ -318,104 +480,28 @@ class PaddleOcrEngine:
             if "没有可提取文本" not in warning
         ]
         page_processing: list[dict[str, Any]] = []
+        config_path = resolve_ocr_config_path(os.getenv("PDF_MD_OCR_CONFIG"))
 
-        config_path = os.getenv("PDF_MD_OCR_CONFIG")
-        pipeline_options: dict[str, Any] = {}
-        if config_path:
-            resolved_config = Path(config_path).expanduser().resolve()
-            if not resolved_config.is_file():
-                raise EngineUnavailableError(
-                    f"OCR 配置文件不存在：{resolved_config}"
+        for page_number in range(1, profile.page_count + 1):
+            if page_number not in low_text_pages:
+                page_processing.append(
+                    {
+                        "page": page_number,
+                        "method": "text_layer",
+                        "status": "completed",
+                        "characters": profile.page_text_chars[page_number - 1],
+                        "confidence": None,
+                    }
                 )
-            pipeline_options["paddlex_config"] = str(resolved_config)
-        else:
-            pipeline_options.update(OCR_PIPELINE_DEFAULTS)
-        try:
-            pipeline = PPStructureV3(**pipeline_options)
-        except Exception as exc:
-            raise RuntimeError(
-                "PaddleOCR 初始化失败；请确认模型已下载，或通过 "
-                "PDF_MD_OCR_CONFIG 指向离线模型配置"
-            ) from exc
+                continue
 
-        with TemporaryDirectory(prefix="pdf-md-ocr-") as temporary:
-            temporary_root = Path(temporary)
-            for page_number in range(1, profile.page_count + 1):
-                if page_number not in low_text_pages:
-                    page_processing.append(
-                        {
-                            "page": page_number,
-                            "method": "text_layer",
-                            "status": "completed",
-                            "characters": profile.page_text_chars[page_number - 1],
-                            "confidence": None,
-                        }
-                    )
-                    continue
-
-                single_page_pdf = temporary_root / f"page-{page_number}.pdf"
-                writer = PdfWriter()
-                writer.add_page(reader.pages[page_number - 1])
-                with single_page_pdf.open("wb") as handle:
-                    writer.write(handle)
-
-                try:
-                    results = list(
-                        pipeline.predict(input=str(single_page_pdf))
-                    )
-                    page_markdown = (
-                        _ocr_markdown(results[0]) if results else ""
-                    )
-                    confidence = (
-                        _ocr_confidence(results[0]) if results else None
-                    )
-                    if not page_markdown:
-                        raise RuntimeError("OCR 没有返回可用文字")
-                    metadata_lines = ["<!-- extraction-method: ocr -->"]
-                    if confidence is not None:
-                        metadata_lines.append(
-                            f"<!-- ocr-confidence: {confidence:.4f} -->"
-                        )
-                    pages[page_number] = (
-                        "\n".join(metadata_lines)
-                        + "\n\n"
-                        + page_markdown
-                    )
-                    page_processing.append(
-                        {
-                            "page": page_number,
-                            "method": "ocr",
-                            "status": "completed",
-                            "characters": _visible_chars(page_markdown),
-                            "confidence": confidence,
-                        }
-                    )
-                    confidence_text = (
-                        f"，平均识别置信度 {confidence:.0%}"
-                        if confidence is not None
-                        else ""
-                    )
-                    warnings.append(
-                        f"第 {page_number} 页已使用 OCR{confidence_text}"
-                    )
-                except Exception as exc:
-                    pages[page_number] = (
-                        "<!-- extraction-method: ocr-failed -->\n\n"
-                        "<!-- no extractable text on this page -->"
-                    )
-                    page_processing.append(
-                        {
-                            "page": page_number,
-                            "method": "ocr",
-                            "status": "failed",
-                            "characters": 0,
-                            "confidence": None,
-                            "error": f"{type(exc).__name__}: {exc}",
-                        }
-                    )
-                    warnings.append(
-                        f"第 {page_number} 页 OCR 失败（{exc}）"
-                    )
+        ocr_updates, ocr_processing, ocr_warnings, _, _ = (
+            _ocr_page_batch(source, profile, low_text_pages)
+        )
+        warnings.extend(ocr_warnings)
+        page_processing.extend(ocr_processing)
+        for page_number, page_markdown in ocr_updates.items():
+            pages[page_number] = page_markdown
 
         parts = [prefix, ""] if prefix else []
         for page_number in range(1, profile.page_count + 1):
@@ -434,12 +520,12 @@ class PaddleOcrEngine:
         completed_ocr_pages = [
             item["page"]
             for item in page_processing
-            if item["method"] == "ocr" and item["status"] == "completed"
+            if item["method"].startswith("ocr") and item["status"] == "completed"
         ]
         failed_ocr_pages = [
             item["page"]
             for item in page_processing
-            if item["method"] == "ocr" and item["status"] == "failed"
+            if item["method"].startswith("ocr") and item["status"] == "failed"
         ]
         return EngineOutput(
             markdown=markdown,
@@ -455,6 +541,72 @@ class PaddleOcrEngine:
                 "ocr_config": config_path,
             },
         )
+
+
+def retry_pages_with_paddleocr(
+    source: Path,
+    profile: PdfProfile,
+    output: EngineOutput,
+    retry_pages: list[int],
+    *,
+    retry_reason: str,
+) -> EngineOutput:
+    if not retry_pages or not output.page_markers:
+        return output
+    if not engine_available("paddleocr"):
+        return output
+
+    page_updates, page_processing, retry_warnings, completed_pages, failed_pages = (
+        _ocr_page_batch(source, profile, retry_pages, retry_reason=retry_reason)
+    )
+    if not page_updates and not page_processing:
+        return output
+
+    prefix, pages = _split_markdown_pages(output.markdown)
+    for page_number, page_markdown in page_updates.items():
+        pages[page_number] = page_markdown
+
+    parts = [prefix, ""] if prefix else []
+    for page_number in range(1, profile.page_count + 1):
+        parts.extend(
+            [
+                f"<!-- source-page: {page_number} -->",
+                "",
+                pages.get(
+                    page_number,
+                    "<!-- no extractable text on this page -->",
+                ),
+                "",
+            ]
+        )
+    markdown = "\n".join(parts).strip() + "\n"
+
+    metadata = dict(output.metadata)
+    existing_processing = list(metadata.get("page_processing", []))
+    existing_processing.extend(page_processing)
+    metadata["page_processing"] = existing_processing
+
+    completed_ocr_pages = set(metadata.get("ocr_completed_pages", []))
+    failed_ocr_pages = set(metadata.get("ocr_failed_pages", []))
+    completed_ocr_pages.update(completed_pages)
+    failed_ocr_pages.difference_update(completed_pages)
+    failed_ocr_pages.update(failed_pages)
+    metadata["ocr_completed_pages"] = sorted(completed_ocr_pages)
+    metadata["ocr_failed_pages"] = sorted(failed_ocr_pages)
+    metadata["page_retry_pages"] = sorted({page for page in retry_pages})
+    metadata["page_retry_completed_pages"] = completed_pages
+    metadata["page_retry_failed_pages"] = failed_pages
+    metadata["page_retry_reason"] = retry_reason
+
+    warnings = list(dict.fromkeys(list(output.warnings) + retry_warnings))
+    return EngineOutput(
+        markdown=markdown,
+        engine=output.engine,
+        engine_version=output.engine_version,
+        warnings=warnings,
+        page_markers=output.page_markers,
+        metadata=metadata,
+    )
 
 
 def select_engine(requested: str, profile: PdfProfile) -> ConversionEngine:
